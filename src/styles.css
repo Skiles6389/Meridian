@@ -342,11 +342,27 @@ h2 { margin: 0; font-size: 28px; }
 .pile-list span { color: var(--muted); }
 
 @media (max-width: 860px) {
-  .title-screen, .jet-card, .foe, .hand-wrap { grid-template-columns: 1fr; }
-  .title-screen { min-height: auto; }
+  .title-screen, .hand-wrap { grid-template-columns: 1fr; }
+  .title-screen { min-height: auto; padding: 16px 12px 28px; }
+  .screen-body, .hangar, .records, .how { padding: 12px 12px 28px; }
   .jet-grid { grid-template-columns: 1fr; }
-  .flyer { position: relative; width: 100%; top: auto; left: auto; padding: 24px; }
-  .end-turn { position: sticky; bottom: 8px; }
+  .jet-card { grid-template-columns: 108px 1fr; gap: 6px; }
+  .flyer { position: relative; width: 100%; top: auto; left: auto; padding: 12px; }
+  .hud { padding: 8px 10px; gap: 6px; }
+  .icon-btn { padding: 8px 10px; }
+  .hp { min-width: 0; flex: 1 1 120px; }
+  .section-head, .launch-bar, .node-panel, .resource-row { flex-wrap: wrap; }
+  .launch-bar { align-items: stretch; }
+  .launch-bar .btn.primary { width: 100%; }
+  .section-head h1, .node-panel h2, .event h1, .reward h1, .shop h1 { font-size: 32px; }
+  .foe { grid-template-columns: 92px 1fr; flex-basis: 100%; }
+  .pilot-art { width: 108px; flex: 0 0 auto; }
+  .pilot-row { align-items: center; }
+  .log { min-height: 0; max-height: 92px; overflow: auto; margin: 8px 0; }
+  .card { flex-basis: 142px; min-height: 176px; }
+  .hand { padding-bottom: 4px; }
+  .end-turn { position: sticky; bottom: 8px; z-index: 4; }
+  .map-svg { min-width: 620px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

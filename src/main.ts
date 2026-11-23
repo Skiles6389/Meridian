@@ -1,7 +1,7 @@
-import "@fontsource/barlow/400.css";
-import "@fontsource/barlow/500.css";
-import "@fontsource/rajdhani/600.css";
-import "@fontsource/rajdhani/700.css";
+import "@fontsource/barlow/latin-400.css";
+import "@fontsource/barlow/latin-500.css";
+import "@fontsource/rajdhani/latin-600.css";
+import "@fontsource/rajdhani/latin-700.css";
 import "./styles.css";
 import { setMuted, sfx, unlockAudio } from "./audio";
 import { HELP } from "./game/help";

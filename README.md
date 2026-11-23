@@ -14,12 +14,15 @@ npm run dev
 The dev server binds to port **8731**. Open [http://127.0.0.1:8731](http://127.0.0.1:8731).
 
 ```bash
-npm test        # combat, map generation, and seeded full-sortie simulations
-npm run build   # typecheck and write static files to dist/
-npm run preview # serve the production build
+npm test          # combat, map generation, and seeded full-sortie simulations
+npm run build     # typecheck and write static files to dist/
+npm run preview   # serve the production build
+npm run build:single
 ```
 
 `npm run build` emits a static site (`base: "./"`), so `dist/` can be hosted on any static file host.
+
+`npm run build:single` writes `dist-single/meridian.html`: one file with the script, styles, and fonts inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`.
 
 ## How a sortie works
 
