@@ -31,15 +31,19 @@ function fog(act: number): string {
   return `<div class="sc-fog f1" style="background-image:url('${src}')"></div><div class="sc-fog f2" style="background-image:url('${src}')"></div>`;
 }
 
+function speedLines(count: number, seed: number): string {
+  return `<div class="sc-speed">${particles("streak", count, seed)}</div>`;
+}
+
 function build(key: string): string {
   if (key === "title" || key === "act1") {
-    return `${sky("act1")}${fog(1)}<div class="sc-rain r1"></div><div class="sc-rain r2"></div><div class="sc-lightning"></div>`;
+    return `${sky("act1")}${fog(1)}<div class="sc-rain r1"></div><div class="sc-rain r2"></div><div class="sc-lightning"></div>${speedLines(key === "title" ? 22 : 14, 17)}`;
   }
   if (key === "act2") {
-    return `${sky("act2")}${fog(2)}<div class="sc-haze"></div><div class="sc-embers">${particles("ember", 26, 7)}</div>`;
+    return `${sky("act2")}${fog(2)}<div class="sc-haze"></div><div class="sc-embers">${particles("ember", 26, 7)}</div>${speedLines(14, 23)}`;
   }
   if (key === "act3") {
-    return `${sky("act3")}<div class="sc-aurora a1"></div><div class="sc-aurora a2"></div>${fog(3)}<div class="sc-stars">${particles("star", 46, 3)}</div>`;
+    return `${sky("act3")}<div class="sc-aurora a1"></div><div class="sc-aurora a2"></div>${fog(3)}<div class="sc-stars">${particles("star", 46, 3)}</div>${speedLines(14, 29)}`;
   }
   if (key === "hangar") {
     return `${sky("hangar")}<div class="sc-shafts"></div><div class="sc-dust">${particles("mote", 22, 11)}</div>`;
