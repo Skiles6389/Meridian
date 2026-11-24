@@ -10,6 +10,35 @@ export interface ActionResult {
   message?: string;
 }
 
+/** The player's id in combat effect events; enemy uids are always positive. */
+export const PLAYER = -1;
+
+/**
+ * Presentation events emitted while combat resolves, so the UI can animate
+ * hits and moves in order. They never feed back into game state.
+ */
+export type CombatFx =
+  | { t: "hit"; who: number; from: number; amount: number; blocked: number; hp: number; shield: number }
+  | { t: "evade"; who: number; from: number }
+  | { t: "burn"; who: number; amount: number; hp: number }
+  | { t: "move"; uid: number; kind: Plan["kind"]; name: string }
+  | { t: "shield"; who: number; amount: number; shield: number }
+  | { t: "heal"; who: number; amount: number; hp: number }
+  | { t: "status"; who: number; k: string; n: number }
+  | { t: "down"; who: number }
+  | { t: "phase"; uid: number; text: string }
+  | { t: "turn"; n: number };
+
+let fxSink: ((event: CombatFx) => void) | null = null;
+
+export function setCombatFxSink(sink: ((event: CombatFx) => void) | null) {
+  fxSink = sink;
+}
+
+function fx(run: RunState, event: CombatFx) {
+  if (fxSink && !run.scratch) fxSink(event);
+}
+
 const HAND_LIMIT = 10;
 const FULL_SPECIALS = new Set([
   "stitchFire",
@@ -71,7 +100,14 @@ export function cardCost(run: RunState, def: CardDef): number {
 function heal(run: RunState, amount: number): number {
   const before = run.hp;
   run.hp = Math.min(run.maxHp, run.hp + Math.max(0, amount));
+  if (run.hp > before) fx(run, { t: "heal", who: PLAYER, amount: run.hp - before, hp: run.hp });
   return run.hp - before;
+}
+
+function selfHarm(run: RunState, amount: number) {
+  const before = run.hp;
+  hurt(run, amount);
+  fx(run, { t: "burn", who: PLAYER, amount: before - run.hp, hp: run.hp });
 }
 
 function hurt(run: RunState, amount: number): boolean {
@@ -101,6 +137,7 @@ function gainShield(run: RunState, base: number): number {
   if (has(run, "smokedOptics")) amount -= 2;
   amount = Math.max(0, amount);
   combat.player.shield += amount;
+  if (amount > 0) fx(run, { t: "shield", who: PLAYER, amount, shield: combat.player.shield });
   return amount;
 }
 
@@ -153,6 +190,7 @@ function applyBurnToPlayer(run: RunState, amount: number) {
   let next = amount;
   if (has(run, "coolantLoop")) next = Math.max(0, next - 1);
   combat.player.status.burn += next;
+  if (next > 0) fx(run, { t: "status", who: PLAYER, k: "burn", n: next });
   return next;
 }
 
@@ -164,16 +202,22 @@ function rawHitEnemy(run: RunState, enemy: Fighter, amount: number) {
   enemy.shield -= absorbed;
   damage -= absorbed;
   enemy.hp = Math.max(0, enemy.hp - damage);
+  fx(run, { t: "hit", who: enemy.uid, from: PLAYER, amount: damage, blocked: amount - damage, hp: enemy.hp, shield: enemy.shield });
   if (connected && enemy.riposte > 0 && enemy.riposteReady) {
     enemy.riposteReady = false;
     enemy.shield += enemy.riposte;
+    fx(run, { t: "shield", who: enemy.uid, amount: enemy.riposte, shield: enemy.shield });
   }
-  if (enemy.hp <= 0) log(run, `${enemy.name} is down.`);
+  if (enemy.hp <= 0) {
+    log(run, `${enemy.name} is down.`);
+    fx(run, { t: "down", who: enemy.uid });
+  }
 }
 
 function applyLocked(run: RunState, rng: RNG, enemy: Fighter, amount: number) {
   if (amount <= 0 || enemy.hp <= 0) return;
   enemy.status.locked += amount;
+  fx(run, { t: "status", who: enemy.uid, k: "locked", n: amount });
   const combat = run.combat!;
   for (let i = 0; i < powerCount(run, "siegeRadar"); i++) rawHitEnemy(run, enemy, 5);
   if (!combat.lockedDrawUsed && combat.powers.includes("predictiveTrack")) {
@@ -197,19 +241,25 @@ function applyNumbersToEnemy(run: RunState, enemy: Fighter, hits: number[]) {
   const before = enemy.hp;
   for (const hit of hits) {
     if (enemy.hp <= 0) break;
-    let damage = Math.max(0, hit + enemy.status.locked * 3 - enemy.status.armor);
+    const raw = hit + enemy.status.locked * 3;
+    let damage = Math.max(0, raw - enemy.status.armor);
     const connected = damage > 0;
     const absorbed = Math.min(enemy.shield, damage);
     enemy.shield -= absorbed;
     damage -= absorbed;
     enemy.hp = Math.max(0, enemy.hp - damage);
+    fx(run, { t: "hit", who: enemy.uid, from: PLAYER, amount: damage, blocked: Math.max(0, raw - damage), hp: enemy.hp, shield: enemy.shield });
     if (connected && enemy.riposte > 0 && enemy.riposteReady) {
       enemy.riposteReady = false;
       enemy.shield += enemy.riposte;
+      fx(run, { t: "shield", who: enemy.uid, amount: enemy.riposte, shield: enemy.shield });
     }
   }
   const dealt = before - enemy.hp;
-  if (enemy.hp <= 0) log(run, `${enemy.name} is down.`);
+  if (enemy.hp <= 0) {
+    log(run, `${enemy.name} is down.`);
+    fx(run, { t: "down", who: enemy.uid });
+  }
   return dealt;
 }
 
@@ -277,6 +327,7 @@ function resolveSpecial(run: RunState, rng: RNG, def: CardDef, foe: Fighter | nu
     const burn = combat.player.status.burn;
     combat.player.status.burn = 0;
     combat.player.status.evasion += burn;
+    if (burn) fx(run, { t: "status", who: PLAYER, k: "evasion", n: burn });
     notes.push(burn ? `clear ${burn} Burn, +${burn} Evasion` : "no Burn to clear");
     return true;
   }
@@ -299,6 +350,7 @@ function resolveSpecial(run: RunState, rng: RNG, def: CardDef, foe: Fighter | nu
     if (options.length) {
       const target = rng.pick(options);
       target.status.jam += 1;
+      fx(run, { t: "status", who: target.uid, k: "jam", n: 1 });
       notes.push(`Jam 1 on ${target.name}`);
     }
     return true;
@@ -328,11 +380,13 @@ function resolveEffect(run: RunState, rng: RNG, effect: Effect, foe: Fighter | n
   }
   if (effect.k === "energy") {
     combat.energy += amount;
+    fx(run, { t: "status", who: PLAYER, k: "energy", n: amount });
     notes.push(`+${amount} Energy`);
     return;
   }
   if (effect.k === "evasion") {
     combat.player.status.evasion += amount;
+    fx(run, { t: "status", who: PLAYER, k: "evasion", n: amount });
     notes.push(`+${amount} Evasion`);
     return;
   }
@@ -342,17 +396,19 @@ function resolveEffect(run: RunState, rng: RNG, effect: Effect, foe: Fighter | n
   }
   if (effect.k === "lose") {
     const before = run.hp;
-    hurt(run, amount);
+    selfHarm(run, amount);
     notes.push(`lose ${before - run.hp} HP`);
     return;
   }
   if (effect.k === "thrust") {
     combat.player.status.thrust += amount;
+    fx(run, { t: "status", who: PLAYER, k: "thrust", n: amount });
     notes.push(`+${amount} Thrust`);
     return;
   }
   if (effect.k === "armor") {
     combat.player.status.armor += amount;
+    fx(run, { t: "status", who: PLAYER, k: "armor", n: amount });
     notes.push(`+${amount} Armor`);
     return;
   }
@@ -362,7 +418,10 @@ function resolveEffect(run: RunState, rng: RNG, effect: Effect, foe: Fighter | n
   }
   const targets = effect.aoe ? livingEnemies(run) : foe ? [foe] : [];
   if (effect.k === "burn") {
-    for (const target of targets) target.status.burn += amount;
+    for (const target of targets) {
+      target.status.burn += amount;
+      fx(run, { t: "status", who: target.uid, k: "burn", n: amount });
+    }
     if (targets.length) notes.push(`Burn ${amount}`);
     return;
   }
@@ -372,12 +431,18 @@ function resolveEffect(run: RunState, rng: RNG, effect: Effect, foe: Fighter | n
     return;
   }
   if (effect.k === "jam") {
-    for (const target of targets) target.status.jam += amount;
+    for (const target of targets) {
+      target.status.jam += amount;
+      fx(run, { t: "status", who: target.uid, k: "jam", n: amount });
+    }
     if (targets.length) notes.push(`Jam ${amount}`);
     return;
   }
   if (effect.k === "suppress") {
-    for (const target of targets) target.status.suppress += amount;
+    for (const target of targets) {
+      target.status.suppress += amount;
+      fx(run, { t: "status", who: target.uid, k: "suppress", n: amount });
+    }
     if (targets.length) notes.push("Suppress");
   }
 }
@@ -412,6 +477,7 @@ function bossOpening(run: RunState, enemy: Fighter, touchPlayer: boolean) {
     enemy.phase = 2;
     enemy.bonusDamage += 4;
     log(run, "Graue Eule closes the command net. Her strikes hit harder.");
+    fx(run, { t: "phase", uid: enemy.uid, text: "Command net" });
   }
   if (touchPlayer && enemy.boss === "eule" && enemy.phase === 2) {
     const burned = applyBurnToPlayer(run, 1);
@@ -426,7 +492,8 @@ function bossOpening(run: RunState, enemy: Fighter, touchPlayer: boolean) {
       enemy.status.thrust += 2;
       enemy.bonusDamage += 5;
       enemy.hp = Math.min(enemy.maxHp, enemy.hp + 22);
-      log(run, "Königsadler molts. Armor resets, thrust rises, and it recovers.");
+      log(run, "Königsadler punches off its tanks. Armor resets, thrust rises, and it recovers.");
+      fx(run, { t: "phase", uid: enemy.uid, text: "Tanks away" });
     } else if (!enemy.molted) {
       enemy.status.armor = Math.max(0, enemy.status.armor - 2);
       if (enemy.status.armor === 0) enemy.moltedPending = true;
@@ -440,6 +507,7 @@ function bossOpening(run: RunState, enemy: Fighter, touchPlayer: boolean) {
       enemy.movePtr = 0;
       enemy.status.thrust += 2;
       log(run, "Nebelhorn drops into the horn layer.");
+      fx(run, { t: "phase", uid: enemy.uid, text: "Horn layer" });
     }
     if (enemy.phase < 3 && enemy.hp <= enemy.maxHp * 0.3) {
       enemy.phase = 3;
@@ -448,6 +516,7 @@ function bossOpening(run: RunState, enemy: Fighter, touchPlayer: boolean) {
       enemy.hp = Math.min(enemy.maxHp, enemy.hp + 20);
       if (touchPlayer) run.combat!.player.status.static += 1;
       log(run, "Whiteout. Nebelhorn ignores Evasion and crawls back into the fight.");
+      fx(run, { t: "phase", uid: enemy.uid, text: "Whiteout" });
     }
   }
 }
@@ -463,6 +532,8 @@ function strikePlayer(run: RunState, enemy: Fighter, hits: number[]) {
     if (damage > 0 && combat.player.status.evasion > 0 && !enemy.ignoreEvasion) {
       combat.player.status.evasion -= 1;
       damage = 0;
+      fx(run, { t: "evade", who: PLAYER, from: enemy.uid });
+      continue;
     }
     const absorbed = Math.min(combat.player.shield, damage);
     combat.player.shield -= absorbed;
@@ -470,6 +541,7 @@ function strikePlayer(run: RunState, enemy: Fighter, hits: number[]) {
     const before = run.hp;
     if (damage > 0) hurt(run, damage);
     suffered += before - run.hp;
+    fx(run, { t: "hit", who: PLAYER, from: enemy.uid, amount: before - run.hp, blocked: absorbed, hp: run.hp, shield: combat.player.shield });
   }
   return suffered;
 }
@@ -477,6 +549,8 @@ function strikePlayer(run: RunState, enemy: Fighter, hits: number[]) {
 function performMove(run: RunState, enemy: Fighter) {
   const move = currentMove(enemy);
   advanceMove(enemy);
+  const kind: Plan["kind"] = move.hits > 0 && move.damage > 0 ? "attack" : move.shield > 0 ? "defend" : move.thrust || move.armor || move.heal ? "buff" : "debuff";
+  fx(run, { t: "move", uid: enemy.uid, kind, name: move.name });
   const bits: string[] = [];
   if (move.burn) {
     const burned = applyBurnToPlayer(run, move.burn);
@@ -484,34 +558,42 @@ function performMove(run: RunState, enemy: Fighter) {
   }
   if (move.locked) {
     run.combat!.player.status.locked += move.locked;
+    fx(run, { t: "status", who: PLAYER, k: "locked", n: move.locked });
     bits.push(`Lock ${move.locked}`);
   }
   if (move.jam) {
     run.combat!.player.status.jam += move.jam;
+    fx(run, { t: "status", who: PLAYER, k: "jam", n: move.jam });
     bits.push(`Jam ${move.jam}`);
   }
   if (move.suppress) {
     run.combat!.player.status.suppress += move.suppress;
+    fx(run, { t: "status", who: PLAYER, k: "suppress", n: move.suppress });
     bits.push("Suppress");
   }
   if (move.stat) {
     run.combat!.player.status.static += move.stat;
+    fx(run, { t: "status", who: PLAYER, k: "static", n: move.stat });
     bits.push(`Static ${move.stat}`);
   }
   if (move.heal) {
     enemy.hp = Math.min(enemy.maxHp, enemy.hp + move.heal);
+    fx(run, { t: "heal", who: enemy.uid, amount: move.heal, hp: enemy.hp });
     bits.push(`heal ${move.heal}`);
   }
   if (move.shield) {
     enemy.shield += move.shield;
+    fx(run, { t: "shield", who: enemy.uid, amount: move.shield, shield: enemy.shield });
     bits.push(`+${move.shield} Shield`);
   }
   if (move.thrust) {
     enemy.status.thrust += move.thrust;
+    fx(run, { t: "status", who: enemy.uid, k: "thrust", n: move.thrust });
     bits.push(`Thrust +${move.thrust}`);
   }
   if (move.armor) {
     enemy.status.armor += move.armor;
+    fx(run, { t: "status", who: enemy.uid, k: "armor", n: move.armor });
     bits.push(`Armor +${move.armor}`);
   }
   if (move.hits > 0 && move.damage > 0 && run.combat!.outcome === "fight") {
@@ -530,10 +612,12 @@ function enemyPhase(run: RunState) {
     if (enemy.status.burn > 0) {
       enemy.hp -= enemy.status.burn;
       log(run, `${enemy.name} burns for ${enemy.status.burn}.`);
+      fx(run, { t: "burn", who: enemy.uid, amount: enemy.status.burn, hp: Math.max(0, enemy.hp) });
       enemy.status.burn -= 1;
       if (enemy.hp <= 0) {
         enemy.hp = 0;
         log(run, `${enemy.name} burns down.`);
+        fx(run, { t: "down", who: enemy.uid });
         continue;
       }
     }
@@ -558,6 +642,7 @@ export function beginPlayerTurn(run: RunState) {
   if (!combat || combat.outcome !== "fight") return;
   const rng = rngOf(run);
   combat.turn += 1;
+  fx(run, { t: "turn", n: combat.turn });
   combat.player.shield = 0;
   combat.attacksThisTurn = 0;
   combat.maneuversThisTurn = 0;
@@ -571,16 +656,16 @@ export function beginPlayerTurn(run: RunState) {
   if (combat.player.status.burn > 0) {
     const burn = combat.player.status.burn;
     log(run, `Burn sears you for ${burn}.`);
-    hurt(run, burn);
+    selfHarm(run, burn);
     combat.player.status.burn = Math.max(0, burn - 1);
   }
   if (combat.outcome === "fight" && has(run, "crackedCanopy")) {
     log(run, "Cracked Canopy weeps 1 HP.");
-    hurt(run, 1);
+    selfHarm(run, 1);
   }
   if (combat.outcome === "fight" && has(run, "warpedIntake")) {
     log(run, "Warped Intake bites for 3.");
-    hurt(run, 3);
+    selfHarm(run, 3);
   }
   if (combat.outcome !== "fight" || run.hp <= 0) {
     combat.outcome = "lost";
