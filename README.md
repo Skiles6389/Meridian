@@ -6,6 +6,8 @@ The aircraft are real types: you fly an F-16C, F-15E, F-22A, or EA-18G against G
 
 All art is original and painted for this game: side-view jets, layered act skies, a hand-drawn briefing chart, card illustrations, and event scenes.
 
+**Play in a browser:** [htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/meridian.html](https://htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/meridian.html)
+
 ## Run it
 
 ```bash
@@ -24,7 +26,7 @@ npm run build:single
 
 `npm run build` emits a static site (`base: "./"`), so `dist/` can be hosted on any static file host.
 
-`npm run build:single` writes `dist-single/meridian.html`: one file (about 2.5 MB) with the script, styles, fonts, and art inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`.
+`npm run build:single` writes `dist-single/meridian.html`: one file (about 2.5 MB) with the script, styles, fonts, and art inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`. A copy is committed at `play/meridian.html`, and a workflow rebuilds it on every push to `main`.
 
 ## How a sortie works
 
