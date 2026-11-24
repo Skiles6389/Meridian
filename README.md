@@ -4,7 +4,7 @@ A roguelike deck-builder about holding three air corridors. You fly one real-wor
 
 The aircraft are real types: you fly an F-16C, F-15E, F-22A, or EA-18G against German-operated Starfighters, Alpha Jets, Phantoms, Fulcrums, Tornados, Eurofighters, and the F-35A. Squadrons, callsigns, and the conflict itself are fictional, and every airframe wears neutral markings. No historical or national insignia appear anywhere.
 
-All art is original and painted for this game: side-view jets, layered act skies, a hand-drawn briefing chart, card illustrations, and event scenes.
+All art is original and painted for this game: side-view jets, layered act skies, a hand-drawn briefing chart, card illustrations, and event scenes. The look leans lightly toward aviation anime: cel shading, clean ink linework, flatter color with crisp highlights, and drifting speed lines over the skies, while the airframes stay true to the real types.
 
 **Play in a browser:** [htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/meridian.html](https://htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/meridian.html)
 
@@ -26,7 +26,7 @@ npm run build:single
 
 `npm run build` emits a static site (`base: "./"`), so `dist/` can be hosted on any static file host.
 
-`npm run build:single` writes `dist-single/meridian.html`: one file (about 2.5 MB) with the script, styles, fonts, and art inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`. A copy is committed at `play/meridian.html`, and a workflow rebuilds it on every push to `main`.
+`npm run build:single` writes `dist-single/meridian.html`: one file (about 2.2 MB) with the script, styles, fonts, and art inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`. A copy is committed at `play/meridian.html`, and a workflow rebuilds it on every push to `main`.
 
 ## How a sortie works
 
@@ -87,7 +87,7 @@ Enemies are real German-operated types flown by fictional flights with animal an
 
 ## Art
 
-Painted art lives in `src/assets/art/` as WebP (about 1.4 MB in total):
+Painted art lives in `src/assets/art/` as WebP (about 1.2 MB in total):
 
 - `jets/`: 16 side-view airframes on transparent backgrounds. `jets.json` records each image's aspect ratio and nozzle position, which the game uses to place the afterburner glow.
 - `scenes/`: act skies (stormy sea, river valley at dusk, high altitude under the aurora), drifting fog layers, the hangar, the depot, and the briefing-chart paper.
