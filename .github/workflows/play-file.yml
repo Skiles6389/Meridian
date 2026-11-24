@@ -1,0 +1,46 @@
+name: Rebuild play/meridian.html
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - play/**
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: play-file
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:single
+
+      # Pushes made with GITHUB_TOKEN do not trigger further workflow runs, so this cannot loop.
+      - name: Commit play/meridian.html if it changed
+        run: |
+          mkdir -p play
+          cp dist-single/meridian.html play/meridian.html
+          if git diff --quiet -- play/meridian.html && git ls-files --error-unmatch play/meridian.html >/dev/null 2>&1; then
+            echo "play/meridian.html is up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
+          git add play/meridian.html
+          git commit -m "Rebuild play/meridian.html"
+          git pull --rebase origin main
+          git push origin HEAD:main
