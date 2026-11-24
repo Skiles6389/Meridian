@@ -690,6 +690,6 @@ window.addEventListener("resize", () => {
   }, 140);
 });
 
-if (import.meta.env.DEV) (window as unknown as { __meridian: unknown }).__meridian = { app, draw, persist };
+if (import.meta.env.DEV) (window as unknown as { __dogfight: unknown }).__dogfight = { app, draw, persist };
 
 draw();

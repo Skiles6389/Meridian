@@ -1,4 +1,4 @@
-# Meridian
+# Dogfight
 
 A roguelike deck-builder about holding three air corridors. You fly one real-world jet, spend Energy on a hand of attacks, maneuvers, and systems, and try to bring the airframe home.
 
@@ -6,7 +6,7 @@ The aircraft are real types: you fly an F-16C, F-15E, F-22A, or EA-18G against G
 
 All art is original and painted for this game: side-view jets, layered act skies, a hand-drawn briefing chart, card illustrations, and event scenes. The look leans lightly toward aviation anime: cel shading, clean ink linework, flatter color with crisp highlights, and drifting speed lines over the skies, while the airframes stay true to the real types.
 
-**Play in a browser:** [htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/meridian.html](https://htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/meridian.html)
+**Play in a browser:** [htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/dogfight.html](https://htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/dogfight.html) (the older `play/meridian.html` link serves the same build)
 
 ## Run it
 
@@ -26,13 +26,13 @@ npm run build:single
 
 `npm run build` emits a static site (`base: "./"`), so `dist/` can be hosted on any static file host.
 
-`npm run build:single` writes `dist-single/meridian.html`: one file (about 2.2 MB) with the script, styles, fonts, and art inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`. A copy is committed at `play/meridian.html`, and a workflow rebuilds it on every push to `main`.
+`npm run build:single` writes `dist-single/dogfight.html`: one file (about 2.2 MB) with the script, styles, fonts, and art inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`. Copies are committed at `play/dogfight.html` and `play/meridian.html` (the pre-rename path, kept so old links work), and a workflow rebuilds both on every push to `main`.
 
 ## How a sortie works
 
 1. Pick a jet in the hangar. Only the **F-16C Fighting Falcon** is available on a fresh browser.
 2. Each act is a fully visible branching map. Choose a lane, then the next connected plot.
-3. Fights are turn-based. You draw 5 cards, spend Energy, then end the turn. Enemies telegraph their next action with an intent icon above the jet.
+3. Fights are turn-based tail chases. You draw 5 cards, spend Energy, then end the turn. Enemies telegraph their next action with an intent icon above the jet. Every jet faces the same way and the attacker flies behind: on your turn you sit on the enemies' tails, and when you end the turn the jets swing past each other so the enemies close in on your six.
 4. HP carries from fight to fight. It rises only when something heals you: a card, a relic, a reward, a depot, or an event.
 5. Clear the act boss to generate the next corridor. Clear Act 3's boss, **Nebelhorn**, to win.
 
@@ -44,7 +44,7 @@ After each fight you stow a gold purse plus one extra find: a choice of cards, a
 
 ## Jets and unlocks
 
-Unlocks and the in-progress sortie are stored in `localStorage` (`meridian.meta.v1` and `meridian.run.v1`). Clearing site data resets them. Saves from before the re-skin keep working: internal jet ids (`kite`, `bulwark`, `moth`, `lattice`) are unchanged, and a fight saved mid-turn picks up the new names when it loads.
+Unlocks and the in-progress sortie are stored in `localStorage` (`meridian.meta.v1` and `meridian.run.v1`). The keys still carry the game's original name, Meridian, so saves from before the rename keep loading. Clearing site data resets them. Saves from before the re-skin keep working: internal jet ids (`kite`, `bulwark`, `moth`, `lattice`) are unchanged, and a fight saved mid-turn picks up the new names when it loads.
 
 | Jet | Role | Starts | Unlocks when |
 | --- | --- | --- | --- |

@@ -7,7 +7,7 @@ export const HELP: HelpPage[] = [
   {
     title: "The sortie",
     lines: [
-      "Meridian is a three-corridor deck sortie. You fly one jet, spend Energy on cards, and try to bring the airframe home.",
+      "Dogfight is a three-corridor deck sortie. You fly one jet, spend Energy on cards, and try to bring the airframe home.",
       "Act 1 is the Baltic Shelf, Act 2 is the Rhine Gate, Act 3 is the Glass Meridian. Clear the boss and the next map is generated. Clear Nebelhorn and the sortie is won.",
       "HP carries between fights. Nothing heals you unless a card, a relic, a depot, a reward, or an event says so.",
       "The aircraft are real types. Every squadron, callsign, and story is fictional. Markings are neutral, with no national or historical insignia.",

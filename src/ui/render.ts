@@ -164,7 +164,7 @@ function titleScreen(app: AppState): string {
       <div class="title-copy">
         <div class="logo">
           <p class="logo-kicker">A fighter-jet deck sortie</p>
-          <h1 class="logo-word">MERIDIAN</h1>
+          <h1 class="logo-word">DOGFIGHT</h1>
           <p class="logo-tag">Hold the corridor</p>
         </div>
         <nav class="title-menu">
@@ -823,7 +823,7 @@ function ending(app: AppState): string {
     <section class="ending-screen ${won ? "win" : "loss"}">
       <div class="panel ornate end-panel">
         <div class="ribbon ${won ? "gold" : "red"}"><span>${won ? "Corridor held" : "Sortie over"}</span></div>
-        <h1>${won ? "You held Meridian." : esc(run.defeatReason || "Airframe lost.")}</h1>
+        <h1>${won ? "You held the corridor." : esc(run.defeatReason || "Airframe lost.")}</h1>
         <div class="end-art ${won ? "" : "lost"}">${jetArt(jet.silhouette)}</div>
         <p class="end-line">${esc(jet.callsign)} · Act ${run.act} · ${icon("heart")} ${run.hp}/${run.maxHp} · ${icon("coin")} ${run.gold}</p>
         <p class="fine">Fights ${run.tally.battles} · Elites ${run.tally.elites} · Bosses ${run.tally.bosses} · Seed ${run.seed}</p>

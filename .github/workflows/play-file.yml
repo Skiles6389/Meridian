@@ -1,4 +1,4 @@
-name: Rebuild play/meridian.html
+name: Rebuild play files
 
 on:
   push:
@@ -30,17 +30,19 @@ jobs:
       - run: npm run build:single
 
       # Pushes made with GITHUB_TOKEN do not trigger further workflow runs, so this cannot loop.
-      - name: Commit play/meridian.html if it changed
+      # play/meridian.html keeps the pre-rename name so existing links still work.
+      - name: Commit play/dogfight.html and play/meridian.html if they changed
         run: |
           mkdir -p play
-          cp dist-single/meridian.html play/meridian.html
-          if git diff --quiet -- play/meridian.html && git ls-files --error-unmatch play/meridian.html >/dev/null 2>&1; then
-            echo "play/meridian.html is up to date"
+          cp dist-single/dogfight.html play/dogfight.html
+          cp dist-single/dogfight.html play/meridian.html
+          if [ -z "$(git status --porcelain -- play)" ]; then
+            echo "play files are up to date"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
-          git add play/meridian.html
-          git commit -m "Rebuild play/meridian.html"
+          git add play/dogfight.html play/meridian.html
+          git commit -m "Rebuild play files"
           git pull --rebase origin main
           git push origin HEAD:main

@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [
     viteSingleFile({
       removeViteModuleLoader: true,
-      outputFileName: "meridian.html",
+      outputFileName: "dogfight.html",
     }),
   ],
   build: {

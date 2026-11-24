@@ -2,6 +2,7 @@ import { getEncounter, getEnemy } from "./enemies";
 import type { FoeSpawn } from "./enemies";
 import type { JetId, Meta, MetaStats, RunState } from "./types";
 
+// Keys keep the game's original name so saves made before the rename still load.
 export const META_KEY = "meridian.meta.v1";
 export const RUN_KEY = "meridian.run.v1";
 
