@@ -1,6 +1,7 @@
 import { ACTS } from "../game/acts";
 import { getCard } from "../game/cards";
 import { cardCost, enemyPlan, forecastLoss } from "../game/combat";
+import { getEncounter, getEnemy } from "../game/enemies";
 import { getEvent } from "../game/events";
 import { STATUS_BY_ID } from "../game/glossary";
 import { HELP } from "../game/help";
@@ -8,11 +9,12 @@ import { JETS, JET_ORDER, unlockBlurb } from "../game/jets";
 import { nodeById } from "../game/map";
 import { getRelic } from "../game/relics";
 import { choiceAvailable, reachable, removalCost } from "../game/run";
-import { jetSvg } from "../game/silhouettes";
-import type { CardInst, MapNode, NodeType, RunState, Status } from "../game/types";
+import type { CardDef, Fighter, MapNode, NodeType, Plan, RunState, Status } from "../game/types";
+import { ACT_SCENE, SCENE_ART, cardArt, eventArt, jetArt } from "./art";
+import { icon, nodeIcon, relicIcon } from "./icons";
 import type { AppState } from "./model";
 
-function esc(value: string): string {
+export function esc(value: string): string {
   return value.replace(/[&<>"']/g, (char) => {
     if (char === "&") return "&amp;";
     if (char === "<") return "&lt;";
@@ -22,140 +24,224 @@ function esc(value: string): string {
   });
 }
 
-function chip(id: string, value: number): string {
-  const info = STATUS_BY_ID[id];
-  if (!info || value <= 0) return "";
-  return `<span class="chip" title="${esc(info.text)}">${esc(info.name)} ${value}</span>`;
+function viewport(): { w: number; h: number } {
+  if (typeof window === "undefined") return { w: 1280, h: 800 };
+  return { w: window.innerWidth, h: window.innerHeight };
 }
 
-function statusRow(status: Status, shield = 0): string {
-  const html = [
-    shield > 0 ? `<span class="chip shield" title="${esc(STATUS_BY_ID.shield.text)}">Shield ${shield}</span>` : "",
-    chip("evasion", status.evasion),
-    chip("locked", status.locked),
-    chip("jam", status.jam),
-    chip("burn", status.burn),
-    chip("thrust", status.thrust),
-    chip("armor", status.armor),
-    chip("suppress", status.suppress),
-    chip("static", status.static),
-  ].join("");
-  return html ? `<div class="chips">${html}</div>` : "";
+export function isCompact(): boolean {
+  const { w, h } = viewport();
+  return w <= 720 || h <= 560;
 }
+
+/* ------------------------------------------------------------------ scene */
+
+/** Which painted backdrop sits behind the current screen. */
+export function sceneKey(app: AppState): string {
+  if (app.view === "hangar" || app.view === "records" || app.view === "how") return "hangar";
+  if (app.view === "title" || !app.run) return "title";
+  const run = app.run;
+  if (run.screen === "shop" || (run.screen === "remove" && run.remove?.next === "shop")) return "shop";
+  if (run.screen === "map") return `chart-${run.act}`;
+  return ACT_SCENE[run.act];
+}
+
+/* ---------------------------------------------------------------- shared */
+
+const KEYWORDS = ["Shield", "Evasion", "Locked", "Lock", "Jam", "Burn", "Thrust", "Armor", "Suppress", "Static", "Exhaust", "Energy", "ALL", "Clog"];
+const KW_RE = new RegExp(`\\b(${KEYWORDS.join("|")})\\b|(\\d+)`, "g");
+
+function richText(text: string): string {
+  return esc(text).replace(KW_RE, (match, word: string | undefined) => (word ? `<em class="kw">${match}</em>` : `<b>${match}</b>`));
+}
+
+function typeLabel(def: CardDef): string {
+  if (def.type === "burden") return "Clog";
+  return def.type[0].toUpperCase() + def.type.slice(1);
+}
+
+export function cardFace(def: CardDef, opts: { cost?: number; cls?: string; attrs?: string; tag?: string } = {}): string {
+  const cost = opts.cost ?? def.cost;
+  const cut = cost < def.cost;
+  const tag = opts.tag ?? "div";
+  return `
+    <${tag} class="card type-${def.type} rar-${def.rarity} ${opts.cls ?? ""}" ${opts.attrs ?? ""}>
+      <span class="card-frame">
+        <span class="card-art"><img src="${cardArt(def.id)}" alt="" draggable="false" decoding="async" /></span>
+        <span class="card-name ${def.name.length > 14 ? "long" : ""}"><span>${esc(def.name)}</span></span>
+        <span class="card-type">${typeLabel(def)}</span>
+        <span class="card-text"><span>${richText(def.text)}</span></span>
+        <span class="card-gem" aria-hidden="true"></span>
+      </span>
+      <span class="card-cost ${cut ? "cut" : ""}"><span>${cost}</span></span>
+    </${tag}>`;
+}
+
+function statusChip(id: string, value: number, extraCls = ""): string {
+  const info = STATUS_BY_ID[id];
+  if (!info || value <= 0) return "";
+  return `<span class="st st-${id} ${extraCls}" title="${esc(`${info.name} ${value}: ${info.text}`)}">${icon(id)}<b>${value}</b></span>`;
+}
+
+function statusRow(status: Status): string {
+  return `<div class="st-row">${[
+    statusChip("evasion", status.evasion),
+    statusChip("locked", status.locked),
+    statusChip("jam", status.jam),
+    statusChip("burn", status.burn),
+    statusChip("thrust", status.thrust),
+    statusChip("armor", status.armor),
+    statusChip("suppress", status.suppress),
+    statusChip("static", status.static),
+  ].join("")}</div>`;
+}
+
+export function hpBar(who: number, hp: number, maxHp: number, shield: number, cls = ""): string {
+  const pct = Math.max(0, Math.min(100, (hp / maxHp) * 100));
+  return `
+    <div class="bar ${shield > 0 ? "shielded" : ""} ${cls}" data-bar="${who}" data-max="${maxHp}">
+      <div class="bar-track"><div class="bar-ghost" style="width:${pct}%"></div><div class="bar-fill" style="width:${pct}%"></div></div>
+      <span class="bar-text">${Math.max(0, hp)}/${maxHp}</span>
+      <div class="bar-shield" title="${esc(STATUS_BY_ID.shield.text)}">${icon("shield")}<b>${shield}</b></div>
+    </div>`;
+}
+
+function btn(label: string, act: string, opts: { arg?: string; cls?: string; disabled?: boolean; title?: string } = {}): string {
+  return `<button class="btn ${opts.cls ?? ""}" data-act="${act}" ${opts.arg !== undefined ? `data-arg="${esc(opts.arg)}"` : ""} ${opts.disabled ? "disabled" : ""} ${opts.title ? `title="${esc(opts.title)}"` : ""}><span>${label}</span></button>`;
+}
+
+/* ------------------------------------------------------------------- hud */
 
 function hud(app: AppState): string {
   const run = app.run;
   if (!run) return "";
   const act = ACTS[run.act];
   const jet = JETS[run.jet];
-  const pct = Math.max(0, Math.min(100, (run.hp / run.maxHp) * 100));
   const relic = app.relicId ? getRelic(app.relicId) : null;
+  const low = run.hp <= run.maxHp * 0.3;
   return `
     <header class="hud">
-      <button class="brand-mini" data-act="how" title="How to fly">MERIDIAN</button>
-      <div class="hud-act">
-        <span>Act ${run.act}</span>
-        <strong>${esc(act.name)}</strong>
+      <div class="hud-pilot">
+        <div class="hud-portrait">${jetArt(jet.silhouette)}</div>
+        <div class="hud-name"><b>${esc(jet.callsign)}</b><span>${esc(jet.code)} ${esc(jet.name)}</span></div>
       </div>
-      <div class="hp" title="${esc(jet.callsign)}">
-        <div class="hp-fill" style="width:${pct}%"></div>
-        <span>${run.hp}/${run.maxHp}</span>
+      <div class="hud-stat hud-hp ${low ? "low" : ""}" title="Airframe integrity">${icon("heart")}<b>${run.hp}<small>/${run.maxHp}</small></b></div>
+      <div class="hud-stat hud-gold" title="Gold">${icon("coin")}<b>${run.gold}</b></div>
+      <div class="hud-relics">
+        ${run.relics
+          .map((id) => {
+            const def = getRelic(id);
+            return `<button class="relic relic-${def.kind} ${app.relicId === id ? "on" : ""}" data-act="relic" data-arg="${esc(id)}" title="${esc(`${def.name}: ${def.text}`)}">${relicIcon(id)}</button>`;
+          })
+          .join("")}
       </div>
-      <div class="gold">◈ ${run.gold}</div>
-      <button class="icon-btn" data-act="deck" title="Deck">Deck ${run.deck.length}</button>
-      <button class="icon-btn" data-act="mute">${app.meta.mute ? "Audio off" : "Audio on"}</button>
-      <button class="icon-btn" data-act="save-quit">Save</button>
+      <div class="hud-act"><span>Act ${run.act}</span><b>${esc(act.name)}</b></div>
+      <div class="hud-btns">
+        <button class="hud-btn" data-act="deck" title="Deck">${icon("deck")}<i>${run.deck.length}</i></button>
+        <button class="hud-btn" data-act="how" title="How to fly">${icon("help")}</button>
+        <button class="hud-btn" data-act="mute" title="${app.meta.mute ? "Audio off" : "Audio on"}">${icon(app.meta.mute ? "soundOff" : "soundOn")}</button>
+        <button class="hud-btn" data-act="save-quit" title="Save and step out">${icon("gear")}</button>
+      </div>
     </header>
-    <div class="relic-row">
-      ${run.relics
-        .map((id) => {
-          const def = getRelic(id);
-          return `<button class="relic ${def.kind}" data-act="relic" data-arg="${esc(id)}">${esc(def.name)}</button>`;
-        })
-        .join("")}
-    </div>
     ${
       relic
-        ? `<div class="relic-pop"><strong>${esc(relic.name)}</strong><p>${esc(relic.text)}</p></div>`
+        ? `<div class="relic-pop relic-${relic.kind}" data-act="close-modal"><div class="relic-medal">${relicIcon(relic.id)}</div><div><strong>${esc(relic.name)}</strong><p>${esc(relic.text)}</p></div></div>`
         : ""
     }
-    ${run.notices[0] ? `<button class="notice" data-act="notice">${esc(run.notices[0])}</button>` : ""}
+    ${run.notices[0] && run.screen !== "victory" && run.screen !== "defeat" ? `<button class="notice" data-act="notice"><span>${esc(run.notices[0])}</span><small>Tap to dismiss</small></button>` : ""}
   `;
 }
 
+/* ----------------------------------------------------------------- title */
+
 function titleScreen(app: AppState): string {
-  const jet = jetSvg("kite", "#3ee0c5");
   return `
     <section class="title-screen">
-      <div class="sky" aria-hidden="true">
-        <div class="radar"></div>
-        <div class="flyer">${jet}</div>
+      <div class="title-flight" aria-hidden="true">
+        <div class="title-foe">${jetArt("typhoon", { flip: true })}</div>
+        <div class="title-jet">${jetArt("f16")}</div>
       </div>
       <div class="title-copy">
-        <p class="eyebrow">Provisional wing · sortie deck</p>
-        <h1>MERIDIAN</h1>
-        <p class="tag">Hold the corridor.</p>
-        <div class="btn-col">
-          ${app.run ? `<button class="btn primary" data-act="continue">Continue sortie</button>` : ""}
-          <button class="btn ${app.run ? "" : "primary"}" data-act="hangar">New sortie</button>
-          <button class="btn" data-act="records">Records</button>
-          <button class="btn" data-act="how">How to fly</button>
-          <button class="btn ghost" data-act="mute">${app.meta.mute ? "Audio off" : "Audio on"}</button>
+        <div class="logo">
+          <p class="logo-kicker">A fighter-jet deck sortie</p>
+          <h1 class="logo-word">MERIDIAN</h1>
+          <p class="logo-tag">Hold the corridor</p>
         </div>
-        <p class="fine">Three fictional corridors. One airframe. No historical markings.</p>
+        <nav class="title-menu">
+          ${app.run ? btn("Continue sortie", "continue", { cls: "primary big" }) : ""}
+          ${btn("New sortie", "hangar", { cls: app.run ? "big" : "primary big" })}
+          <div class="title-row">
+            ${btn("Records", "records")}
+            ${btn("How to fly", "how")}
+            ${btn(`${icon(app.meta.mute ? "soundOff" : "soundOn")}`, "mute", { cls: "square", title: app.meta.mute ? "Audio off" : "Audio on" })}
+          </div>
+        </nav>
+        <p class="fine">Real aircraft. Fictional squadrons and callsigns. Neutral markings only.</p>
       </div>
     </section>
   `;
+}
+
+/* ---------------------------------------------------------------- hangar */
+
+function summarize(ids: string[]): { name: string; count: number; type: string }[] {
+  const counts = new Map<string, number>();
+  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  return [...counts.entries()].map(([id, count]) => ({ name: getCard(id).name, count, type: getCard(id).type }));
 }
 
 function hangar(app: AppState): string {
-  const cards = JET_ORDER.map((id) => {
+  const picked = JETS[app.jetPick];
+  const relic = getRelic(picked.relic);
+  const unlocked = app.meta.unlocked[app.jetPick];
+  const roster = JET_ORDER.map((id) => {
     const jet = JETS[id];
-    const unlocked = app.meta.unlocked[id];
+    const open = app.meta.unlocked[id];
     const selected = app.jetPick === id;
     return `
-      <button class="jet-card ${selected ? "selected" : ""} ${unlocked ? "" : "locked"}" data-act="pick-jet" data-arg="${id}" ${unlocked ? "" : "disabled"}>
-        <div class="jet-art">${jetSvg(jet.silhouette, jet.accent)}</div>
-        <div class="jet-copy">
-          <p class="eyebrow">${esc(jet.code)} · ${esc(jet.role)}</p>
-          <h2>${esc(jet.name)}</h2>
-          <p>${esc(jet.blurb)}</p>
-          <p class="fine">${esc(jet.play)}</p>
-          <p class="fine">HP ${jet.hp} · ${esc(getRelic(jet.relic).name)}</p>
-          ${unlocked ? "" : `<p class="lock-note">${esc(unlockBlurb(id, app.meta.stats.mysteries))}</p>`}
-        </div>
-      </button>
-    `;
+      <button class="roster-tile ${selected ? "on" : ""} ${open ? "" : "locked"}" data-act="pick-jet" data-arg="${id}" title="${esc(open ? `${jet.code} ${jet.name}` : unlockBlurb(id, app.meta.stats.mysteries))}">
+        <span class="roster-art">${jetArt(jet.silhouette)}</span>
+        <span class="roster-code">${esc(jet.code)}</span>
+        <span class="roster-name">${esc(jet.name)}</span>
+        ${open ? "" : `<span class="roster-lock">Locked</span>`}
+      </button>`;
   }).join("");
-  const picked = JETS[app.jetPick];
-  const deck = summarize(picked.deck);
+  const hpPct = Math.round((picked.hp / 90) * 100);
   return `
-    <section class="hangar">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Hangar</p>
-          <h1>Choose an airframe</h1>
-        </div>
-        <button class="btn ghost" data-act="title">Back</button>
+    <section class="hangar-screen">
+      <div class="screen-head">
+        ${btn("Back", "title", { cls: "ghost" })}
+        <div class="head-title"><p class="eyebrow">Hangar</p><h1>Choose an airframe</h1></div>
       </div>
-      <div class="jet-grid">${cards}</div>
-      <div class="launch-bar">
-        <div>
-          <strong>${esc(picked.callsign)}</strong>
-          <p class="fine">Starting deck: ${esc(deck)}</p>
-          <label class="seed">Seed <input data-act="seed" value="${esc(app.seedInput)}" inputmode="numeric" placeholder="random" /></label>
+      <div class="hangar-main">
+        <div class="hangar-stage">
+          <div class="hangar-jet ${unlocked ? "" : "locked"}">${jetArt(picked.silhouette, { cls: "showcase" })}<div class="hangar-floor"></div></div>
+          <div class="hangar-plate">
+            <span class="plate-code">${esc(picked.code)}</span>
+            <span class="plate-name">${esc(picked.name)}</span>
+            <span class="plate-role">${esc(picked.role)} · ${esc(picked.maker)}</span>
+          </div>
         </div>
-        <button class="btn primary" data-act="launch" ${app.meta.unlocked[app.jetPick] ? "" : "disabled"}>Launch</button>
+        <aside class="hangar-info panel">
+          <p class="callsign">Callsign ${esc(picked.callsign)}</p>
+          <p class="blurb">${esc(picked.blurb)}</p>
+          <div class="spec"><span>Airframe</span><div class="spec-bar"><i style="width:${hpPct}%"></i></div><b>${picked.hp} HP</b></div>
+          <div class="system-slot relic-starter"><div class="relic-medal">${relicIcon(relic.id)}</div><div><strong>${esc(relic.name)}</strong><p>${esc(relic.text)}</p></div></div>
+          <p class="fine">${esc(picked.play)}</p>
+          <div class="deck-chips">${summarize(picked.deck).map((row) => `<span class="deck-chip type-${row.type}">${row.count}× ${esc(row.name)}</span>`).join("")}</div>
+          ${unlocked ? "" : `<p class="lock-note">${icon("suppress")} ${esc(unlockBlurb(app.jetPick, app.meta.stats.mysteries))}</p>`}
+          <div class="launch-row">
+            <label class="seed">Seed <input data-act="seed" value="${esc(app.seedInput)}" inputmode="numeric" placeholder="random" /></label>
+            ${btn("Launch", "launch", { cls: "primary big launch", disabled: !unlocked })}
+          </div>
+        </aside>
       </div>
+      <div class="hangar-roster">${roster}</div>
     </section>
   `;
 }
 
-function summarize(ids: string[]): string {
-  const counts = new Map<string, number>();
-  for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
-  return [...counts.entries()].map(([id, count]) => `${count}× ${getCard(id).name}`).join(", ");
-}
+/* --------------------------------------------------------- records / how */
 
 function records(app: AppState): string {
   const stats = app.meta.stats;
@@ -173,24 +259,23 @@ function records(app: AppState): string {
     ["Best win HP", stats.bestVictoryHp ? String(stats.bestVictoryHp) : "—"],
   ];
   return `
-    <section class="records">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Debrief locker</p>
-          <h1>Records</h1>
+    <section class="paper-screen">
+      <div class="screen-head">
+        ${btn("Back", "back", { cls: "ghost" })}
+        <div class="head-title"><p class="eyebrow">Debrief locker</p><h1>Records</h1></div>
+      </div>
+      <div class="panel records-panel">
+        <div class="stat-grid">
+          ${rows.map(([label, value]) => `<div class="stat"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}
         </div>
-        <button class="btn ghost" data-act="back">Back</button>
+        <ul class="unlock-list">
+          ${JET_ORDER.map((id) => {
+            const jet = JETS[id];
+            const on = app.meta.unlocked[id];
+            return `<li class="${on ? "on" : ""}"><span class="unlock-art">${jetArt(jet.silhouette)}</span><strong>${esc(jet.code)} ${esc(jet.name)}</strong><span>${on ? "Unlocked" : esc(unlockBlurb(id, stats.mysteries))}</span></li>`;
+          }).join("")}
+        </ul>
       </div>
-      <div class="stat-grid">
-        ${rows.map(([label, value]) => `<div class="stat"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("")}
-      </div>
-      <ul class="unlock-list">
-        ${JET_ORDER.map((id) => {
-          const jet = JETS[id];
-          const on = app.meta.unlocked[id];
-          return `<li class="${on ? "on" : ""}"><strong>${esc(jet.code)} ${esc(jet.name)}</strong><span>${on ? "Unlocked" : esc(unlockBlurb(id, stats.mysteries))}</span></li>`;
-        }).join("")}
-      </ul>
     </section>
   `;
 }
@@ -198,26 +283,25 @@ function records(app: AppState): string {
 function how(app: AppState): string {
   const page = HELP[app.howPage] ?? HELP[0];
   return `
-    <section class="how">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Briefing ${app.howPage + 1} / ${HELP.length}</p>
-          <h1>${esc(page.title)}</h1>
+    <section class="paper-screen">
+      <div class="screen-head">
+        ${btn("Close", "back", { cls: "ghost" })}
+        <div class="head-title"><p class="eyebrow">Briefing ${app.howPage + 1} / ${HELP.length}</p><h1>${esc(page.title)}</h1></div>
+      </div>
+      <div class="panel how-panel">
+        ${page.lines.map((line) => `<p>${richText(line)}</p>`).join("")}
+        <div class="btn-row">
+          ${btn("Back", "how-prev", { disabled: app.howPage === 0 })}
+          ${btn(app.howPage === HELP.length - 1 ? "Done" : "Next", "how-next", { cls: "primary" })}
         </div>
-        <button class="btn ghost" data-act="back">Close</button>
-      </div>
-      <div class="how-body">
-        ${page.lines.map((line) => `<p>${esc(line)}</p>`).join("")}
-      </div>
-      <div class="btn-row">
-        <button class="btn" data-act="how-prev" ${app.howPage === 0 ? "disabled" : ""}>Back</button>
-        <button class="btn primary" data-act="how-next">${app.howPage === HELP.length - 1 ? "Done" : "Next"}</button>
       </div>
     </section>
   `;
 }
 
-const NODE_NAME: Record<NodeType, string> = {
+/* ------------------------------------------------------------------- map */
+
+export const NODE_NAME: Record<NodeType, string> = {
   battle: "Battle",
   elite: "Elite",
   shop: "Depot",
@@ -235,274 +319,419 @@ function nodeBlurb(node: MapNode): string {
   return "The corridor boss. Win to advance.";
 }
 
+function hash(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function jitter(id: string, salt: number, amount: number): number {
+  return (((hash(id + salt) % 1000) / 1000) * 2 - 1) * amount;
+}
+
+const COASTS: Record<number, string> = {
+  1: "M-10 210 C 60 190 90 250 150 236 S 240 170 300 196 S 380 260 420 236 M 520 0 C 540 80 600 120 640 110 S 760 140 800 120 M -10 820 C 80 760 120 860 220 830 S 340 760 420 800",
+  2: "M 120 -10 C 140 120 90 220 150 330 S 260 470 220 600 S 140 760 200 900 S 260 1000 240 1100 M 560 -10 C 540 140 600 240 560 360 S 470 520 540 660 S 620 820 560 1100",
+  3: "M -10 300 C 120 260 220 330 360 290 S 600 250 760 300 M -10 700 C 160 660 260 740 420 700 S 640 650 800 700",
+};
+
 function mapScreen(app: AppState): string {
   const run = app.run!;
-  const width = 760;
-  const rowGap = 108;
-  const height = 48 + (run.map.rows - 1) * rowGap + 48;
-  const pos = (node: MapNode) => ({
-    x: ((node.col + 0.5) / 7) * width,
-    y: 36 + (run.map.rows - 1 - node.row) * rowGap,
-  });
+  const { w: vw } = viewport();
+  const compact = vw <= 720;
+  const width = Math.round(Math.min(760, vw - (compact ? 16 : 320)));
+  const rowGap = compact ? 128 : 146;
+  const top = compact ? 150 : 170;
+  const height = top + (run.map.rows - 1) * rowGap + (compact ? 150 : 150);
+  const pad = compact ? 34 : 70;
+  const pos = (node: MapNode) => {
+    if (node.type === "boss") return { x: width / 2, y: top - 40 };
+    return {
+      x: pad + ((node.col + 0.5) / 7) * (width - pad * 2) + jitter(node.id, 1, compact ? 8 : 16),
+      y: top + (run.map.rows - 1 - node.row) * rowGap + jitter(node.id, 2, 14),
+    };
+  };
   const open = new Set(reachable(run).map((node) => node.id));
-  const route = new Set(run.route);
-  const lines: string[] = [];
-  for (let i = 0; i < run.route.length - 1; i++) {
-    const from = nodeById(run.map, run.route[i]);
-    const to = nodeById(run.map, run.route[i + 1]);
-    if (!from || !to) continue;
-    const a = pos(from);
-    const b = pos(to);
-    lines.push(`<line class="route-line" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" />`);
-  }
-  const faint: string[] = [];
+  const routeIdx = new Map(run.route.map((id, index) => [id, index]));
+  const current = run.nodeId ? nodeById(run.map, run.nodeId) : null;
+
+  const curve = (a: { x: number; y: number }, b: { x: number; y: number }, key: string) => {
+    const mx = (a.x + b.x) / 2 + jitter(key, 3, 18);
+    const my = (a.y + b.y) / 2 + jitter(key, 4, 8);
+    return `M${a.x.toFixed(1)} ${a.y.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
+  };
+
+  const paths: string[] = [];
+  const taken: string[] = [];
   for (const node of run.map.nodes) {
     const a = pos(node);
-    const routeIndex = run.route.indexOf(node.id);
+    const ri = routeIdx.get(node.id);
     for (const id of node.edges) {
       const next = nodeById(run.map, id);
       if (!next) continue;
       const b = pos(next);
-      const taken = routeIndex >= 0 && run.route[routeIndex + 1] === id;
-      if (taken) continue;
-      faint.push(`<line class="map-line" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" />`);
+      const d = curve(a, b, node.id + id);
+      const wasTaken = ri !== undefined && run.route[ri + 1] === id;
+      const live = current ? node.id === current.id && open.has(id) : false;
+      if (wasTaken) taken.push(`<path class="ink-route" d="${d}"/>`);
+      else paths.push(`<path class="ink-path ${live ? "live" : ""}" d="${d}"/>`);
     }
   }
-  lines.unshift(...faint);
-  const circles = run.map.nodes
+
+  const bossDef = run.map.nodes.find((node) => node.type === "boss");
+  let bossArt = "";
+  if (bossDef?.encounterId) {
+    try {
+      const foe = getEnemy(getEncounter(bossDef.encounterId).foes[0].id);
+      bossArt = jetArt(foe.silhouette, { flip: true, livery: foe.livery });
+    } catch {
+      bossArt = "";
+    }
+  }
+
+  const nodes = run.map.nodes
     .map((node) => {
       const p = pos(node);
       const flags = [
-        node.type,
+        `n-${node.type}`,
         open.has(node.id) ? "reachable" : "",
         node.id === run.nodeId ? "current" : "",
-        route.has(node.id) && node.id !== run.nodeId ? "past" : "",
+        routeIdx.has(node.id) && node.id !== run.nodeId ? "past" : "",
         node.id === app.selectedNode ? "picked" : "",
       ]
         .filter(Boolean)
         .join(" ");
-      return `
-        <g class="map-node ${flags}" data-act="select-node" data-arg="${esc(node.id)}" transform="translate(${p.x} ${p.y})">
-          <circle class="face" r="22" />
-          <circle class="hit" r="36" />
-          <text class="node-label" y="46">${esc(NODE_NAME[node.type])}</text>
-        </g>
-      `;
+      const inner =
+        node.type === "boss"
+          ? `<span class="seal">${bossArt}</span><span class="seal-label">Boss</span>`
+          : `<span class="stamp">${nodeIcon(node.type)}</span>`;
+      return `<button class="node ${flags}" data-act="select-node" data-arg="${esc(node.id)}" style="left:${p.x.toFixed(1)}px;top:${p.y.toFixed(1)}px" title="${NODE_NAME[node.type]}">${inner}<span class="node-ring"></span><span class="node-x"></span></button>`;
     })
     .join("");
+
+  const marker = current
+    ? (() => {
+        const p = pos(current);
+        return `<div class="you-marker" style="left:${p.x}px;top:${p.y}px">${jetArt(JETS[run.jet].silhouette)}</div>`;
+      })()
+    : "";
+
   const selected = app.selectedNode ? nodeById(run.map, app.selectedNode) : null;
   const canFly = selected ? open.has(selected.id) : false;
+  const legend = (["battle", "elite", "shop", "mystery", "gamble", "boss"] as NodeType[])
+    .map((type) => `<li><span class="stamp legend-stamp">${nodeIcon(type)}</span>${NODE_NAME[type]}</li>`)
+    .join("");
+
   return `
     <section class="map-screen">
-      <p class="act-blurb">${esc(ACTS[run.act].blurb)} Seed ${run.seed}.</p>
-      <div class="map-scroll">
-        <svg class="map-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Corridor map">
-          ${lines.join("")}
-          ${circles}
-        </svg>
+      <div class="chart-scroll" data-scroll="chart">
+        <div class="chart act-${run.act}" style="width:${width}px;height:${height}px;background-image:url('${SCENE_ART.chart ?? ""}')">
+          <svg class="chart-ink" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true">
+            <g class="chart-coast" transform="scale(${(width / 760).toFixed(3)} ${(height / 1100).toFixed(3)})"><path d="${COASTS[run.act]}"/></g>
+            <g class="compass" transform="translate(${width - (compact ? 46 : 74)} ${height - (compact ? 60 : 86)}) scale(${compact ? 0.6 : 1})">
+              <circle r="34"/><circle r="26" class="thin"/>
+              <path d="M0 -44 L7 0 L0 44 L-7 0Z" class="needle"/><path d="M-44 0 L0 6 L44 0 L0 -6Z" class="needle2"/>
+              <text y="-50">N</text>
+            </g>
+            ${paths.join("")}
+            ${taken.join("")}
+          </svg>
+          <div class="chart-cartouche"><span>Act ${run.act}</span><b>${esc(ACTS[run.act].name)}</b><small>Seed ${run.seed}</small></div>
+          ${nodes}
+          ${marker}
+        </div>
       </div>
-      <div class="node-panel">
+      <aside class="chart-legend">
+        <p class="legend-head">Legend</p>
+        <ul>${legend}</ul>
+        <p class="legend-note">${esc(ACTS[run.act].blurb)}</p>
+      </aside>
+      <div class="brief-slip ${selected ? "has" : ""}">
         ${
           selected
-            ? `<div><p class="eyebrow">${esc(NODE_NAME[selected.type])}</p><h2>${esc(nodeBlurb(selected))}</h2></div>
-               <button class="btn primary" data-act="fly" data-arg="${esc(selected.id)}" ${canFly ? "" : "disabled"}>${canFly ? "Fly" : "Not on this route"}</button>`
-            : `<div><p class="eyebrow">Route</p><h2>${run.nodeId ? "Pick a connected plot." : "The whole corridor is on the scope. Pick a first plot."}</h2></div>`
+            ? `<div class="slip-icon">${selected.type === "boss" ? icon("attack") : nodeIcon(selected.type)}</div>
+               <div class="slip-copy"><p class="eyebrow">${esc(NODE_NAME[selected.type])}</p><p>${esc(nodeBlurb(selected))}</p></div>
+               ${btn(canFly ? "Fly" : "Not on route", "fly", { arg: selected.id, cls: "primary", disabled: !canFly })}`
+            : `<div class="slip-copy"><p class="eyebrow">Route</p><p>${run.nodeId ? "Pick a connected plot. The live lanes are inked darker." : "The whole corridor is on the chart. Pick a first plot at the bottom."}</p></div>`
         }
       </div>
     </section>
   `;
 }
 
-function intentHtml(plan: ReturnType<typeof enemyPlan>): string {
-  if (plan.kind === "down") return `<div class="intent down"><span>Next</span><strong>${esc(plan.title)}</strong></div>`;
-  let figure = "—";
-  if (plan.damage > 0 && plan.hits > 1 && !plan.uneven) figure = `${plan.hits}×${plan.perHit}`;
+/* ---------------------------------------------------------------- battle */
+
+function intentHtml(plan: Plan): string {
+  if (plan.kind === "down") return `<div class="intent intent-down" title="${esc(plan.title)}">${icon("down")}<b>${esc(plan.title)}</b></div>`;
+  let figure = "";
+  if (plan.damage > 0 && plan.hits > 1 && !plan.uneven) figure = `${plan.perHit}<small>×${plan.hits}</small>`;
   else if (plan.damage > 0) figure = String(plan.damage);
-  else if (plan.shield > 0) figure = `+${plan.shield}`;
-  const extra = [
-    plan.damage > 0 && plan.shield > 0 ? `Shield +${plan.shield}` : "",
+  const ico =
+    plan.damage > 0 ? "attack" : plan.shield > 0 ? "shield" : plan.kind === "buff" ? "buff" : "debuff";
+  const extras: string[] = [];
+  if (plan.damage > 0 && plan.shield > 0) extras.push(`<span class="mini mini-shield">${icon("shield")}${plan.shield}</span>`);
+  if (!plan.damage && plan.shield > 0) figure = String(plan.shield);
+  for (const tag of plan.tags) {
+    const [word, num] = tag.split(" ");
+    const key = word.toLowerCase() === "lock" ? "locked" : word.toLowerCase();
+    if (["burn", "locked", "jam", "static", "suppress", "thrust", "armor"].includes(key)) {
+      extras.push(`<span class="mini mini-${key}">${icon(key)}${num && !num.startsWith("+") ? num : num ? num.slice(1) : ""}</span>`);
+    }
+  }
+  const detail = [
+    plan.damage > 0 ? (plan.hits > 1 && !plan.uneven ? `${plan.hits} hits of ${plan.perHit}` : `${plan.damage} damage`) : "",
+    plan.shield > 0 ? `+${plan.shield} Shield` : "",
     ...plan.tags,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(", ");
   return `
-    <div class="intent ${plan.kind}">
-      <span>Next · ${esc(plan.title)}</span>
-      <strong>${esc(figure)}</strong>
-      ${extra ? `<em>${esc(extra)}</em>` : ""}
-    </div>
-  `;
+    <div class="intent intent-${plan.kind} ${plan.damage >= 15 ? "heavy" : ""}" title="${esc(`Next: ${plan.title}${detail ? ` — ${detail}` : ""}`)}">
+      <span class="intent-ico">${icon(ico)}</span>${figure ? `<b>${figure}</b>` : ""}${extras.join("")}
+      <span class="intent-name">${esc(plan.title)}</span>
+    </div>`;
+}
+
+function foeHtml(run: RunState, enemy: Fighter, index: number, app: AppState): string {
+  const def = getEnemy(enemy.defId);
+  let plan: Plan = { kind: "down", title: "Down", damage: 0, hits: 0, perHit: 0, uneven: false, shield: 0, tags: [] };
+  if (enemy.hp > 0) {
+    try {
+      plan = enemyPlan(run, enemy);
+    } catch {
+      /* forecasting is cosmetic */
+    }
+  }
+  const selected = app.targetUid === enemy.uid;
+  const down = enemy.hp <= 0;
+  return `
+    <div class="foe ${selected ? "selected" : ""} ${down ? "down" : ""} ${enemy.boss ? "boss" : ""} ${enemy.elite ? "elite" : ""}" data-act="target" data-arg="${enemy.uid}" data-who="${enemy.uid}" style="--slot:${index}">
+      ${down ? "" : intentHtml(plan)}
+      <div class="unit-art">${jetArt(enemy.silhouette, { flip: true, livery: def.livery })}<div class="reticle"></div></div>
+      <div class="unit-hud">
+        <div class="nameplate"><b>${esc(enemy.name)}</b><small>${esc(enemy.epithet)}</small></div>
+        ${hpBar(enemy.uid, enemy.hp, enemy.maxHp, enemy.shield)}
+        ${statusRow(enemy.status)}
+      </div>
+    </div>`;
+}
+
+interface Slot {
+  x: number;
+  y: number;
+  r: number;
+}
+
+export function handLayout(n: number): { slots: Slot[]; cw: number } {
+  const { w: vw } = viewport();
+  const compact = isCompact();
+  const cw = compact ? Math.min(112, Math.max(92, vw / 4.1)) : vw < 1100 ? 150 : 170;
+  const room = compact ? vw - 56 : Math.min(980, vw - 440);
+  const gap = n > 1 ? Math.min(cw * 0.8, (room - cw) / (n - 1)) : 0;
+  const tilt = compact ? 2.4 : 3.6;
+  const slots: Slot[] = [];
+  for (let i = 0; i < n; i++) {
+    const o = i - (n - 1) / 2;
+    slots.push({ x: o * gap, y: Math.abs(o) ** 1.6 * (compact ? 2.6 : 4), r: o * tilt * Math.min(1, 6 / Math.max(n, 1)) });
+  }
+  return { slots, cw: Math.round(cw) };
 }
 
 function battle(app: AppState): string {
-  const run = app.run!;
+  const frozen = !!app.frozen;
+  const run = app.frozen ?? app.run!;
   const combat = run.combat!;
-  const foes = combat.enemies
-    .map((enemy) => {
-          const plan = enemyPlan(run, enemy);
-      const pct = Math.max(0, (enemy.hp / enemy.maxHp) * 100);
-      const selected = app.targetUid === enemy.uid;
-      return `
-        <button class="foe ${selected ? "selected" : ""} ${enemy.hp <= 0 ? "down" : ""}" data-act="target" data-arg="${enemy.uid}">
-          <div class="foe-art">${jetSvg(enemy.silhouette, enemy.accent, true)}</div>
-          <div class="foe-copy">
-            <p class="eyebrow">${esc(enemy.epithet)}</p>
-            <h2>${esc(enemy.name)}</h2>
-            <div class="hp enemy-hp"><div class="hp-fill" style="width:${pct}%"></div><span>${Math.max(0, enemy.hp)}/${enemy.maxHp}</span></div>
-            ${statusRow(enemy.status, enemy.shield)}
-            ${enemy.hp > 0 ? intentHtml(plan) : `<div class="intent down"><strong>Down</strong></div>`}
-          </div>
-        </button>
-      `;
-    })
-    .join("");
-  const hand = combat.hand
-    .map((card, index) => cardHtml(run, card, index))
-    .join("");
+  const living = combat.enemies.filter((enemy) => enemy.hp > 0);
+  const foes = combat.enemies.map((enemy, index) => foeHtml(run, enemy, index, app)).join("");
+  const layout = handLayout(combat.hand.length);
+  const hand = frozen
+    ? ""
+    : combat.hand
+        .map((inst, index) => {
+          const def = getCard(inst.id);
+          const cost = cardCost(run, def);
+          const playable = combat.outcome === "fight" && combat.energy >= cost;
+          const slot = layout.slots[index];
+          return `<div class="slot ${app.armed === index ? "armed" : ""}" data-slot="${index}" data-uid="${inst.uid}" style="--x:${slot.x.toFixed(1)}px;--y:${slot.y.toFixed(1)}px;--r:${slot.r.toFixed(2)}deg;--z:${index + 1}">
+            ${cardFace(def, {
+              cost,
+              tag: "button",
+              cls: playable ? "playable" : "unplayable",
+              attrs: `data-act="play" data-arg="${index}" data-card="${esc(inst.id)}" data-target="${def.target}" data-key="${index + 1}"`,
+            })}
+          </div>`;
+        })
+        .join("");
   let incoming = 0;
-  try {
-    incoming = forecastLoss(run);
-  } catch {
-    incoming = 0;
+  if (!frozen) {
+    try {
+      incoming = forecastLoss(run);
+    } catch {
+      incoming = 0;
+    }
   }
-  const log = combat.log.slice(-6);
+  const jet = JETS[run.jet];
   const powers = combat.powers
-    .map((id) => `<span class="chip" title="${esc(getCard(id).text)}">${esc(getCard(id).name)}</span>`)
+    .map((id) => `<span class="power" title="${esc(`${getCard(id).name}: ${getCard(id).text}`)}">${icon("energy")}${esc(getCard(id).name)}</span>`)
     .join("");
+  const orbMax = Math.max(combat.maxEnergy, 1);
+  const anyPlayable = !frozen && combat.hand.some((inst) => combat.energy >= cardCost(run, getCard(inst.id)));
+  const needsTarget = app.armed !== null && combat.hand[app.armed] && getCard(combat.hand[app.armed].id).target === "enemy" && living.length > 1;
   return `
-    <section class="battle">
-      <p class="eyebrow contact">${esc(combat.encounterName)} · Turn ${combat.turn}</p>
-      <div class="foe-row">${foes}</div>
-      <div class="pilot-row">
-        <div class="pilot-art">${jetSvg(JETS[run.jet].silhouette, JETS[run.jet].accent)}</div>
-        <div>
-          <strong>${esc(JETS[run.jet].callsign)}</strong>
-          ${statusRow(combat.player.status, combat.player.shield)}
-          ${powers ? `<div class="chips">${powers}</div>` : ""}
+    <section class="battle n${combat.enemies.length} ${frozen ? "frozen" : ""} ${needsTarget ? "aiming" : ""}" style="--cw:${layout.cw}px">
+      <div class="stage">
+        <div class="contact-tag"><span>${esc(combat.encounterName)}</span><b>Turn ${combat.turn}</b></div>
+        <div class="ally" data-who="-1">
+          <div class="unit-art">${jetArt(jet.silhouette, { cls: "player" })}</div>
+          <div class="unit-hud">
+            <div class="nameplate"><b>${esc(jet.callsign)}</b><small>${esc(jet.code)} ${esc(jet.name)}</small></div>
+            ${hpBar(-1, run.hp, run.maxHp, combat.player.shield, "player")}
+            ${statusRow(combat.player.status)}
+            ${powers ? `<div class="power-row">${powers}</div>` : ""}
+          </div>
+        </div>
+        <div class="foes">${foes}</div>
+      </div>
+      <div class="tray">
+        <div class="tray-left">
+          <div class="energy-orb ${combat.energy === 0 ? "empty" : ""}" title="Energy">
+            <div class="orb-ring"></div><div class="orb-core"></div><div class="orb-swirl"></div>
+            <span class="orb-num">${combat.energy}<small>/${orbMax}</small></span>
+          </div>
+          <button class="pile pile-draw" data-act="deck-draw" title="Draw pile">${icon("deck")}<i>${combat.draw.length}</i></button>
+        </div>
+        <div class="hand">${hand || (frozen ? "" : `<p class="empty-hand">No cards in hand.</p>`)}</div>
+        <div class="tray-right">
+          <button class="end-turn ${anyPlayable ? "" : "ready"}" data-act="end-turn" ${frozen ? "disabled" : ""}>
+            <span>End turn</span>
+            <small class="${incoming > 0 ? "warn" : ""}">${incoming > 0 ? `Incoming ${incoming}` : "Clean exchange"}</small>
+          </button>
+          <div class="pile-row">
+            <button class="pile pile-discard" data-act="deck-discard" title="Discard pile">${icon("discard")}<i>${combat.discard.length + combat.played.length}</i></button>
+            <button class="pile pile-exhaust" data-act="deck-exhaust" title="Exhausted">${icon("exhaust")}<i>${combat.exhaustPile.length}</i></button>
+          </div>
         </div>
       </div>
-      <div class="log" aria-live="polite">${log.map((line) => `<p>${esc(line)}</p>`).join("")}</div>
-      <div class="resource-row">
-        <div class="energy" title="Energy">${Array.from({ length: Math.max(combat.maxEnergy, combat.energy) }, (_, i) => `<i class="${i < combat.energy ? "on" : ""}"></i>`).join("")}</div>
-        <button class="icon-btn" data-act="deck">Draw ${combat.draw.length}</button>
-        <button class="icon-btn" data-act="deck-discard">Discard ${combat.discard.length + combat.played.length}</button>
-        <button class="icon-btn" data-act="deck-exhaust">Exhaust ${combat.exhaustPile.length}</button>
-      </div>
-      <div class="hand-wrap">
-        <div class="hand">${hand || `<p class="empty-hand">No cards in hand.</p>`}</div>
-        <button class="btn end-turn" data-act="end-turn">End turn<span>${incoming > 0 ? `You would take ${incoming}` : "Clean exchange"}</span></button>
-      </div>
+      <button class="log-toggle ${app.showLog ? "on" : ""}" data-act="toggle-log" title="Combat log">${icon("log")}</button>
+      ${app.showLog ? `<div class="log-panel" aria-live="polite">${combat.log.slice(-14).map((line) => `<p>${esc(line)}</p>`).join("")}</div>` : ""}
+      ${needsTarget ? `<div class="aim-hint">Choose a target</div>` : ""}
     </section>
   `;
 }
 
-function cardHtml(run: RunState, inst: CardInst, index: number | null): string {
-  const def = getCard(inst.id);
-  const combat = run.combat;
-  const cost = combat ? cardCost(run, def) : def.cost;
-  const playable = !!combat && combat.outcome === "fight" && combat.energy >= cost && index !== null;
-  const cut = cost < def.cost;
-  const attrs = index === null ? "" : `data-act="play" data-arg="${index}"`;
-  return `
-    <button class="card ${def.type} ${playable ? "playable" : "dim"}" ${attrs}>
-      <div class="card-top">
-        <span>${esc(def.type === "burden" ? "clog" : def.type)}</span>
-        <b class="cost ${cut ? "cut" : ""}">${cost}</b>
-      </div>
-      <h3>${esc(def.name)}</h3>
-      <p>${esc(def.text)}</p>
-      <small>${esc(def.rarity)}</small>
-    </button>
-  `;
-}
+/* ---------------------------------------------------------------- reward */
 
 function reward(app: AppState): string {
-  return rewardClean(app.run!);
-}
-
-function rewardClean(run: RunState): string {
-  const rewardState = run.reward!;
-  const relic = rewardState.relic ? getRelic(rewardState.relic) : null;
-  const cards = (rewardState.cards ?? [])
-    .map((id) => {
-      const def = getCard(id);
-      return `
-        <button class="card ${def.type}" data-act="take-card" data-arg="${esc(id)}" ${rewardState.cardTaken ? "disabled" : ""}>
-          <div class="card-top"><span>${esc(def.type)}</span><b class="cost">${def.cost}</b></div>
-          <h3>${esc(def.name)}</h3>
-          <p>${esc(def.text)}</p>
-          <small>${rewardState.cardTaken ? "passed" : "take this"}</small>
-        </button>
-      `;
-    })
+  const run = app.run!;
+  const state = run.reward!;
+  const relic = state.relic ? getRelic(state.relic) : null;
+  const cards = (state.cards ?? [])
+    .map((id) =>
+      cardFace(getCard(id), {
+        tag: "button",
+        cls: `pick ${state.cardTaken ? "spent" : ""}`,
+        attrs: `data-act="take-card" data-arg="${esc(id)}" ${state.cardTaken ? "disabled" : ""}`,
+      }),
+    )
     .join("");
+  const rows: string[] = [];
+  if (state.purse) rows.push(`<div class="loot done">${icon("coin")}<span>${state.purse} gold stowed</span><em>Collected</em></div>`);
+  if (relic) {
+    rows.push(`<button class="loot relic-${relic.kind} ${state.relicTaken ? "done" : ""}" data-act="take-relic" ${state.relicTaken ? "disabled" : ""}>
+      <span class="relic-medal">${relicIcon(relic.id)}</span><span><b>${esc(relic.name)}</b><small>${esc(relic.text)}</small></span><em>${state.relicTaken ? "Installed" : "Install"}</em></button>`);
+  }
+  if (state.heal) {
+    rows.push(`<button class="loot ${state.healTaken ? "done" : ""}" data-act="take-heal" ${state.healTaken ? "disabled" : ""}>
+      ${icon("heart")}<span><b>Field repairs</b><small>Restore ${state.heal} HP</small></span><em>${state.healTaken ? "Repaired" : "Accept"}</em></button>`);
+  }
+  const boss = state.next === "intermission" || state.next === "victory";
   return `
-    <section class="reward">
-      <p class="eyebrow">After-action</p>
-      <h1>${rewardState.purse ? `Purse +${rewardState.purse} gold, already stowed.` : "A find on the plot."}</h1>
-      ${rewardState.note ? `<p class="fine">${esc(rewardState.note)}</p>` : ""}
-      ${cards ? `<div class="hand">${cards}</div>` : ""}
-      <div class="btn-col">
+    <section class="reward-screen">
+      <div class="panel ornate reward-panel">
+        <div class="ribbon ${boss ? "gold" : ""}"><span>${boss ? "Corridor boss down" : state.purse ? "Splash one" : "A find on the plot"}</span></div>
+        ${state.note ? `<p class="reward-note">${esc(state.note)}</p>` : ""}
+        <div class="loot-list">${rows.join("")}</div>
         ${
-          relic
-            ? `<button class="btn" data-act="take-relic" ${rewardState.relicTaken ? "disabled" : ""}>${rewardState.relicTaken ? "Installed" : "Install"} ${esc(relic.name)}</button>
-               <p class="fine">${esc(relic.text)}</p>`
+          cards
+            ? `<p class="pick-head">${state.cardTaken ? "Card added to the deck" : "Add one card to your deck"}</p><div class="pick-row">${cards}</div>`
             : ""
         }
-        ${
-          rewardState.heal
-            ? `<button class="btn" data-act="take-heal" ${rewardState.healTaken ? "disabled" : ""}>${rewardState.healTaken ? "Repaired" : `Accept repairs +${rewardState.heal} HP`}</button>`
-            : ""
-        }
-        <button class="btn primary" data-act="ack-reward">${rewardState.next === "victory" ? "Finish debrief" : rewardState.next === "intermission" || rewardState.next === "advance" ? "Continue" : "Return to the corridor"}</button>
+        <div class="btn-row center">
+          ${btn(state.next === "victory" ? "Finish debrief" : state.next === "map" ? (cards && !state.cardTaken ? "Skip and return to the chart" : "Return to the chart") : "Continue", "ack-reward", { cls: "primary big" })}
+        </div>
       </div>
     </section>
   `;
 }
+
+/* ------------------------------------------------------------------ shop */
 
 function shop(app: AppState): string {
   const run = app.run!;
-  const shopState = run.shop!;
-  const cards = shopState.cards
+  const state = run.shop!;
+  const cards = state.cards
     .map((offer, index) => {
       const def = getCard(offer.id);
+      const poor = run.gold < offer.price;
       return `
-        <button class="card ${def.type}" data-act="buy-card" data-arg="${index}" ${offer.sold || run.gold < offer.price ? "disabled" : ""}>
-          <div class="card-top"><span>${offer.sold ? "sold" : `${offer.price} gold`}</span><b class="cost">${def.cost}</b></div>
-          <h3>${esc(def.name)}</h3>
-          <p>${esc(def.text)}</p>
-        </button>
-      `;
+        <div class="ware ${offer.sold ? "sold" : ""}">
+          ${cardFace(def, { tag: "button", cls: "buy", attrs: `data-act="buy-card" data-arg="${index}" ${offer.sold || poor ? "disabled" : ""}` })}
+          <span class="price ${poor && !offer.sold ? "poor" : ""}">${offer.sold ? "Sold" : `${icon("coin")}${offer.price}`}</span>
+        </div>`;
     })
     .join("");
-  const relics = shopState.relics
+  const relics = state.relics
     .map((offer, index) => {
       const def = getRelic(offer.id);
+      const poor = run.gold < offer.price;
       return `
-        <button class="shop-relic" data-act="buy-relic" data-arg="${index}" ${offer.sold || run.gold < offer.price ? "disabled" : ""}>
-          <strong>${esc(def.name)}</strong>
-          <span>${offer.sold ? "Installed" : `${offer.price} gold`}</span>
-          <p>${esc(def.text)}</p>
-        </button>
-      `;
+        <button class="shelf-item relic-${def.kind} ${offer.sold ? "sold" : ""}" data-act="buy-relic" data-arg="${index}" ${offer.sold || poor ? "disabled" : ""}>
+          <span class="relic-medal">${relicIcon(def.id)}</span>
+          <span class="shelf-copy"><b>${esc(def.name)}</b><small>${esc(def.text)}</small></span>
+          <span class="price ${poor && !offer.sold ? "poor" : ""}">${offer.sold ? "Installed" : `${icon("coin")}${offer.price}`}</span>
+        </button>`;
     })
     .join("");
+  const healDisabled = state.healSold || run.hp >= run.maxHp || run.gold < state.healPrice;
+  const removeCost = removalCost(run);
   return `
-    <section class="shop">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">Field depot</p>
-          <h1>Buy, repair, or lighten the jet</h1>
+    <section class="shop-screen">
+      <div class="shop-sign"><span>Field Depot</span><small>Quartermaster's table · ${icon("coin")} ${run.gold} on hand</small></div>
+      <div class="shop-table">${cards}</div>
+      <div class="shop-lower">
+        <div class="shelf panel">${relics || `<p class="fine">No new packages on the shelf.</p>`}</div>
+        <div class="services">
+          <button class="service" data-act="buy-heal" ${healDisabled ? "disabled" : ""}>
+            ${icon("heart")}<span><b>${state.healSold ? "Repaired" : `Repair +${state.healAmount} HP`}</b><small>${run.hp >= run.maxHp ? "Airframe is whole" : "Patch the airframe"}</small></span>
+            <span class="price ${run.gold < state.healPrice ? "poor" : ""}">${icon("coin")}${state.healPrice}</span>
+          </button>
+          <button class="service" data-act="open-remove">
+            ${icon("discard")}<span><b>Remove a card</b><small>Lighten the deck</small></span>
+            <span class="price ${run.gold < removeCost ? "poor" : ""}">${icon("coin")}${removeCost}</span>
+          </button>
         </div>
-        <button class="btn ghost" data-act="leave-shop">Leave</button>
       </div>
-      <div class="hand">${cards}</div>
-      <div class="relic-shop">${relics || `<p class="fine">No new packages on the shelf.</p>`}</div>
-      <div class="btn-row">
-        <button class="btn" data-act="buy-heal" ${shopState.healSold || run.hp >= run.maxHp || run.gold < shopState.healPrice ? "disabled" : ""}>
-          Repair +${shopState.healAmount} · ${shopState.healPrice} gold
-        </button>
-        <button class="btn" data-act="open-remove">Remove a card · ${removalCost(run)} gold</button>
+      <div class="btn-row center">${btn("Back to the chart", "leave-shop", { cls: "big" })}</div>
+    </section>
+  `;
+}
+
+/* ---------------------------------------------------------------- events */
+
+function storyScreen(opts: { art: string; kicker: string; title: string; story: string; body: string }): string {
+  return `
+    <section class="event-screen">
+      <div class="panel ornate event-card">
+        <div class="event-art"><img src="${opts.art}" alt="" decoding="async" /></div>
+        <div class="event-body">
+          <p class="eyebrow">${esc(opts.kicker)}</p>
+          <h1>${esc(opts.title)}</h1>
+          <p class="story">${esc(opts.story)}</p>
+          ${opts.body}
+        </div>
       </div>
     </section>
   `;
@@ -513,93 +742,77 @@ function eventScreen(app: AppState): string {
   const view = run.event!;
   const event = getEvent(view.id);
   if (view.done) {
-    return `
-      <section class="event">
-        <p class="eyebrow">Mystery</p>
-        <h1>${esc(event.title)}</h1>
-        <p class="story">${esc(view.result)}</p>
-        <button class="btn primary" data-act="event-continue">Back to the corridor</button>
-      </section>
-    `;
+    return storyScreen({
+      art: eventArt(view.id),
+      kicker: "Mystery",
+      title: event.title,
+      story: view.result,
+      body: `<div class="btn-row">${btn("Back to the chart", "event-continue", { cls: "primary big" })}</div>`,
+    });
   }
   const choices = event.choices
     .map((choice) => {
       const gate = choiceAvailable(run, choice);
-      return `
-        <button class="choice" data-act="event" data-arg="${esc(choice.id)}" ${gate.ok ? "" : "disabled"}>
-          <strong>${esc(choice.label)}</strong>
-          <span>${esc(gate.ok ? choice.detail : gate.reason)}</span>
-        </button>
-      `;
+      return `<button class="choice" data-act="event" data-arg="${esc(choice.id)}" ${gate.ok ? "" : "disabled"}><b>${esc(choice.label)}</b><span>${esc(gate.ok ? choice.detail : gate.reason)}</span></button>`;
     })
     .join("");
-  return `
-    <section class="event">
-      <p class="eyebrow">Mystery</p>
-      <h1>${esc(event.title)}</h1>
-      <p class="story">${esc(event.body)}</p>
-      <div class="choice-list">${choices}</div>
-    </section>
-  `;
+  return storyScreen({ art: eventArt(view.id), kicker: "Mystery", title: event.title, story: event.body, body: `<div class="choices">${choices}</div>` });
 }
 
 function gamble(app: AppState): string {
   const view = app.run!.gamble!;
   if (view.done) {
-    return `
-      <section class="event">
-        <p class="eyebrow">Yard toss</p>
-        <h1>The tag comes up</h1>
-        <p class="story">${esc(view.result)}</p>
-        <button class="btn primary" data-act="leave-gamble">Back to the corridor</button>
-      </section>
-    `;
+    return storyScreen({
+      art: eventArt("gamble"),
+      kicker: "Yard toss",
+      title: "The tag comes up",
+      story: view.result,
+      body: `<div class="btn-row">${btn("Back to the chart", "leave-gamble", { cls: "primary big" })}</div>`,
+    });
   }
-  return `
-    <section class="event">
-      <p class="eyebrow">Yard toss</p>
-      <h1>Pull a maintenance tag</h1>
-      <p class="story">The yard chief flips a sealed tag onto the crate. Take it and you install whatever is inside: a working package, or a cursed one. Walk away and they press 15 gold into your glove.</p>
-      <div class="btn-row">
-        <button class="btn primary" data-act="gamble" data-arg="take">Pull the tag</button>
-        <button class="btn" data-act="gamble" data-arg="walk">Walk · +15 gold</button>
-      </div>
-    </section>
-  `;
+  return storyScreen({
+    art: eventArt("gamble"),
+    kicker: "Yard toss",
+    title: "Pull a maintenance tag",
+    story:
+      "The yard chief flips a sealed tag onto the crate. Take it and you install whatever is inside: a working package, or a cursed one. Walk away and they press 15 gold into your glove.",
+    body: `<div class="choices">
+      <button class="choice" data-act="gamble" data-arg="take"><b>Pull the tag</b><span>A useful relic, or a cursed one.</span></button>
+      <button class="choice" data-act="gamble" data-arg="walk"><b>Walk away</b><span>Stow 15 gold.</span></button>
+    </div>`,
+  });
 }
 
 function removal(app: AppState): string {
   const run = app.run!;
   const view = run.remove!;
   const cards = run.deck
-    .map((card) => {
-      const def = getCard(card.id);
-      return `<button class="mini-card" data-act="remove-card" data-arg="${card.uid}"><strong>${esc(def.name)}</strong><span>${esc(def.type)} · ${def.cost}</span></button>`;
-    })
+    .map((card) => cardFace(getCard(card.id), { tag: "button", cls: "pick small", attrs: `data-act="remove-card" data-arg="${card.uid}"` }))
     .join("");
   return `
-    <section class="event">
-      <p class="eyebrow">${view.price ? `Removal · ${view.price} gold` : "Free removal"}</p>
-      <h1>Pull one card</h1>
-      <div class="mini-list">${cards}</div>
-      <button class="btn ghost" data-act="cancel-remove">Cancel</button>
+    <section class="deck-screen">
+      <div class="panel ornate deck-panel">
+        <div class="ribbon"><span>${view.price ? `Remove a card · ${view.price} gold` : "Free removal"}</span></div>
+        <p class="pick-head">Pick the card to pull from the deck.</p>
+        <div class="card-grid">${cards}</div>
+        <div class="btn-row center">${btn("Cancel", "cancel-remove", { cls: "ghost" })}</div>
+      </div>
     </section>
   `;
 }
 
 function intermission(): string {
-  return `
-    <section class="event">
-      <p class="eyebrow">Corridor clear</p>
-      <h1>The next airspace is already painting you</h1>
-      <p class="story">You get one hardstand choice before the new map. HP will not tick up on its own.</p>
-      <div class="choice-list">
-        <button class="choice" data-act="intermission" data-arg="heal"><strong>Field repair</strong><span>Heal 40% of max HP.</span></button>
-        <button class="choice" data-act="intermission" data-arg="relic"><strong>Depot crate</strong><span>Install a random useful relic.</span></button>
-        <button class="choice" data-act="intermission" data-arg="card"><strong>Munitions</strong><span>Choose 1 of 3 cards.</span></button>
-      </div>
-    </section>
-  `;
+  return storyScreen({
+    art: eventArt("intermission"),
+    kicker: "Corridor clear",
+    title: "The next airspace is already painting you",
+    story: "You get one hardstand choice before the new chart. HP will not tick up on its own.",
+    body: `<div class="choices">
+      <button class="choice" data-act="intermission" data-arg="heal"><b>Field repair</b><span>Heal 40% of max HP.</span></button>
+      <button class="choice" data-act="intermission" data-arg="relic"><b>Depot crate</b><span>Install a random useful relic.</span></button>
+      <button class="choice" data-act="intermission" data-arg="card"><b>Munitions</b><span>Choose 1 of 3 cards.</span></button>
+    </div>`,
+  });
 }
 
 function ending(app: AppState): string {
@@ -607,88 +820,85 @@ function ending(app: AppState): string {
   const won = run.screen === "victory";
   const jet = JETS[run.jet];
   return `
-    <section class="endcard ${won ? "win" : "loss"}">
-      <p class="eyebrow">${won ? "Corridor held" : "Sortie over"}</p>
-      <h1>${won ? "You held Meridian." : esc(run.defeatReason || "Airframe lost.")}</h1>
-      <div class="end-art">${jetSvg(jet.silhouette, jet.accent)}</div>
-      <p>${esc(jet.callsign)} · Act ${run.act} · HP ${run.hp}/${run.maxHp} · ◈ ${run.gold}</p>
-      <p class="fine">Fights ${run.tally.battles} · Elites ${run.tally.elites} · Bosses ${run.tally.bosses} · Seed ${run.seed}</p>
-      <div class="relic-row static">
-        ${run.relics.map((id) => `<span class="relic ${getRelic(id).kind}">${esc(getRelic(id).name)}</span>`).join("")}
-      </div>
-      ${run.notices.map((note) => `<p class="notice static">${esc(note)}</p>`).join("")}
-      <div class="btn-row">
-        <button class="btn primary" data-act="finish">${won ? "Hangar" : "Title"}</button>
-        <button class="btn" data-act="records">Records</button>
+    <section class="ending-screen ${won ? "win" : "loss"}">
+      <div class="panel ornate end-panel">
+        <div class="ribbon ${won ? "gold" : "red"}"><span>${won ? "Corridor held" : "Sortie over"}</span></div>
+        <h1>${won ? "You held Meridian." : esc(run.defeatReason || "Airframe lost.")}</h1>
+        <div class="end-art ${won ? "" : "lost"}">${jetArt(jet.silhouette)}</div>
+        <p class="end-line">${esc(jet.callsign)} · Act ${run.act} · ${icon("heart")} ${run.hp}/${run.maxHp} · ${icon("coin")} ${run.gold}</p>
+        <p class="fine">Fights ${run.tally.battles} · Elites ${run.tally.elites} · Bosses ${run.tally.bosses} · Seed ${run.seed}</p>
+        <div class="end-relics">${run.relics.map((id) => `<span class="relic relic-${getRelic(id).kind}" title="${esc(getRelic(id).name)}">${relicIcon(id)}</span>`).join("")}</div>
+        ${run.notices.map((note) => `<p class="notice static">${esc(note)}</p>`).join("")}
+        <div class="btn-row center">
+          ${btn(won ? "Hangar" : "Title", "finish", { cls: "primary big" })}
+          ${btn("Records", "records")}
+        </div>
       </div>
     </section>
   `;
 }
 
+/* ---------------------------------------------------------------- modals */
+
+const TYPE_ORDER: Record<string, number> = { attack: 0, maneuver: 1, system: 2, burden: 3 };
+
 function deckModal(app: AppState): string {
   const run = app.run!;
   const tab = app.deckTab;
-  let rows: { name: string; detail: string }[] = [];
-  if (!run.combat || tab === "loadout") {
-    rows = run.deck.map((card) => {
-      const def = getCard(card.id);
-      return { name: def.name, detail: `${def.type} · ${def.cost} · ${def.text}` };
-    });
-  } else if (tab === "draw") {
-    rows = run.combat.draw.map((card) => ({ name: getCard(card.id).name, detail: "Draw pile" }));
+  let ids: string[] = [];
+  let title = "Loadout";
+  if (!run.combat || tab === "loadout") ids = run.deck.map((card) => card.id);
+  else if (tab === "draw") {
+    ids = run.combat.draw.map((card) => card.id);
+    title = "Draw pile";
   } else if (tab === "discard") {
-    rows = [...run.combat.played, ...run.combat.discard].map((card) => ({ name: getCard(card.id).name, detail: "Discard" }));
+    ids = [...run.combat.played, ...run.combat.discard].map((card) => card.id);
+    title = "Discard pile";
   } else {
-    rows = run.combat.exhaustPile.map((card) => ({ name: getCard(card.id).name, detail: "Exhausted" }));
+    ids = run.combat.exhaustPile.map((card) => card.id);
+    title = "Exhausted";
   }
-  const counts = new Map<string, number>();
-  for (const row of rows) counts.set(row.name, (counts.get(row.name) ?? 0) + 1);
-  const unique = [...counts.entries()].map(([name, count]) => {
-    const detail = rows.find((row) => row.name === name)?.detail ?? "";
-    return `<li><strong>${count}× ${esc(name)}</strong><span>${esc(detail)}</span></li>`;
+  const sorted = [...ids].sort((a, b) => {
+    const da = getCard(a);
+    const db = getCard(b);
+    return TYPE_ORDER[da.type] - TYPE_ORDER[db.type] || da.cost - db.cost || da.name.localeCompare(db.name);
   });
+  const tabs = run.combat
+    ? `<div class="tabs">${(["loadout", "draw", "discard", "exhaust"] as const)
+        .map((key) => `<button class="tab ${tab === key ? "on" : ""}" data-act="tab" data-arg="${key}">${key === "loadout" ? "Loadout" : key === "draw" ? "Draw" : key === "discard" ? "Discard" : "Exhaust"}</button>`)
+        .join("")}</div>`
+    : "";
   return `
     <div class="modal" data-act="close-modal">
-      <div class="modal-card" data-act="stop">
-        <div class="section-head">
-          <h2>${run.combat ? "Piles" : "Loadout"}</h2>
-          <button class="btn ghost" data-act="close-modal">Close</button>
-        </div>
-        ${
-          run.combat
-            ? `<div class="btn-row">
-                <button class="btn ${tab === "loadout" ? "primary" : ""}" data-act="tab" data-arg="loadout">Loadout</button>
-                <button class="btn ${tab === "draw" ? "primary" : ""}" data-act="tab" data-arg="draw">Draw</button>
-                <button class="btn ${tab === "discard" ? "primary" : ""}" data-act="tab" data-arg="discard">Discard</button>
-                <button class="btn ${tab === "exhaust" ? "primary" : ""}" data-act="tab" data-arg="exhaust">Exhaust</button>
-              </div>`
-            : ""
-        }
-        <ul class="pile-list">${unique.join("") || "<li>Empty.</li>"}</ul>
+      <div class="modal-card panel ornate deck-modal" data-act="stop">
+        <div class="modal-head"><h2>${title} <small>${sorted.length} cards</small></h2>${btn("Close", "close-modal", { cls: "ghost" })}</div>
+        ${tabs}
+        <div class="card-grid">${sorted.map((id) => cardFace(getCard(id), { cls: "small" })).join("") || `<p class="fine">Empty.</p>`}</div>
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
 function confirmModal(title: string, body: string, yes: string, act: string): string {
   return `
     <div class="modal">
-      <div class="modal-card">
+      <div class="modal-card panel ornate confirm">
         <h2>${esc(title)}</h2>
         <p>${esc(body)}</p>
-        <div class="btn-row">
-          <button class="btn danger" data-act="${act}">${esc(yes)}</button>
-          <button class="btn ghost" data-act="close-modal">Cancel</button>
+        <div class="btn-row center">
+          ${btn(esc(yes), act, { cls: "danger" })}
+          ${btn("Cancel", "close-modal", { cls: "ghost" })}
         </div>
       </div>
-    </div>
-  `;
+    </div>`;
 }
+
+/* ------------------------------------------------------------------ root */
 
 function runScreen(app: AppState): string {
   const run = app.run!;
   let body = "";
-  if (run.screen === "map") body = mapScreen(app);
+  if (app.frozen?.combat) body = battle(app);
+  else if (run.screen === "map") body = mapScreen(app);
   else if (run.screen === "combat" && run.combat) body = battle(app);
   else if (run.screen === "reward" && run.reward) body = reward(app);
   else if (run.screen === "shop" && run.shop) body = shop(app);
@@ -699,6 +909,11 @@ function runScreen(app: AppState): string {
   else if (run.screen === "victory" || run.screen === "defeat") body = ending(app);
   else body = mapScreen(app);
   return `${hud(app)}<div class="screen-body">${body}</div>`;
+}
+
+export function screenName(app: AppState): string {
+  if (app.view === "run" && app.run) return app.frozen ? "combat" : app.run.screen;
+  return app.view;
 }
 
 export function renderApp(app: AppState): string {
@@ -716,6 +931,5 @@ export function renderApp(app: AppState): string {
   else if (app.modal === "confirm-new") {
     modal = confirmModal("Scrap the current sortie?", "The airframe in progress will be marked as a loss.", "Scrap and launch", "launch-confirm");
   }
-  const screenName = app.view === "run" && app.run ? app.run.screen : app.view;
-  return `<div class="shell ${app.shake ? "shake" : ""}" data-screen="${esc(screenName)}">${toast}${screen}${modal}</div>`;
+  return `<div class="shell" data-screen="${esc(screenName(app))}">${toast}${screen}${modal}</div>`;
 }
