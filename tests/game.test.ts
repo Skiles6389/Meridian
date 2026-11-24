@@ -67,10 +67,10 @@ describe("combat", () => {
     expect(enemy.hp).toBe(enemy.maxHp - 6);
     forceHand(run, ["flarePop"]);
     performPlayCard(run, 0, null);
-    expect(run.combat!.player.shield).toBe(5);
+    expect(run.combat!.player.shield).toBe(6);
     const hp = run.hp;
     performEndTurn(run);
-    expect(run.hp).toBe(hp - 3);
+    expect(run.hp).toBe(hp - 5);
     expect(run.combat!.player.shield).toBe(0);
   });
 
@@ -113,7 +113,7 @@ describe("combat", () => {
     run.combat!.player.shield = 0;
     run.combat!.player.status.burn = 0;
     performEndTurn(run);
-    expect(run.hp).toBe(hp - 6);
+    expect(run.hp).toBe(hp - 10);
   });
 
   it("splits an end turn so enemies attack from behind, then the player takes the lead back", () => {

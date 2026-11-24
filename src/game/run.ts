@@ -93,8 +93,8 @@ export function grantRelic(run: RunState, meta: Meta, id: string): string {
     run.maxHp += 8;
     run.hp += 8;
   } else if (id === "crackedCanopy") {
-    run.maxHp += 12;
-    run.hp += 12;
+    run.maxHp += 18;
+    run.hp += 18;
   } else if (id === "hauntedPump") {
     healTo(run, 10);
   }
@@ -193,9 +193,9 @@ function winCombat(run: RunState, meta: Meta) {
     else heal = Math.ceil(run.maxHp * 0.22);
   } else {
     const roll = rng.next();
-    if (roll < 0.55) cards = draftCards(run, rng, 3, bias);
-    else if (roll < 0.78) heal = Math.ceil(run.maxHp * 0.24);
-    else if (roll < 0.92) relic = pickRelic(rng, unowned(run, shopRelics()));
+    if (roll < 0.6) cards = draftCards(run, rng, 3, bias);
+    else if (roll < 0.82) heal = Math.ceil(run.maxHp * 0.24);
+    else if (roll < 0.88) relic = pickRelic(rng, unowned(run, shopRelics()));
     else gainGold(run, meta, 22);
   }
   if (!relic && mode === "boss") gainGold(run, meta, 30);

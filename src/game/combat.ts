@@ -133,8 +133,8 @@ function gainShield(run: RunState, base: number): number {
   const combat = run.combat;
   if (!combat || base <= 0) return 0;
   let amount = base;
-  if (has(run, "stabilators")) amount += 2;
-  if (has(run, "smokedOptics")) amount -= 2;
+  if (has(run, "stabilators")) amount += 1;
+  if (has(run, "smokedOptics")) amount -= 1;
   amount = Math.max(0, amount);
   combat.player.shield += amount;
   if (amount > 0) fx(run, { t: "shield", who: PLAYER, amount, shield: combat.player.shield });
@@ -219,7 +219,7 @@ function applyLocked(run: RunState, rng: RNG, enemy: Fighter, amount: number) {
   enemy.status.locked += amount;
   fx(run, { t: "status", who: enemy.uid, k: "locked", n: amount });
   const combat = run.combat!;
-  for (let i = 0; i < powerCount(run, "siegeRadar"); i++) rawHitEnemy(run, enemy, 5);
+  for (let i = 0; i < powerCount(run, "siegeRadar"); i++) rawHitEnemy(run, enemy, 6);
   if (!combat.lockedDrawUsed && combat.powers.includes("predictiveTrack")) {
     combat.lockedDrawUsed = true;
     draw(run, rng, 1);
@@ -229,9 +229,9 @@ function applyLocked(run: RunState, rng: RNG, enemy: Fighter, amount: number) {
 function attackFlat(run: RunState, firstAttack: boolean): number {
   const combat = run.combat!;
   let bonus = 0;
-  if (firstAttack && has(run, "ordnanceBay")) bonus += 5;
+  if (firstAttack && has(run, "ordnanceBay")) bonus += 9;
   if (combat.attacksThisCombat > 0 && combat.attacksThisCombat % 3 === 0 && has(run, "tallyStencil")) bonus += 8;
-  if (has(run, "leadBallast")) bonus += 3;
+  if (has(run, "leadBallast")) bonus += 4;
   if (has(run, "smokedOptics")) bonus += 4;
   return bonus;
 }
@@ -284,7 +284,7 @@ function resolveSpecial(run: RunState, rng: RNG, def: CardDef, foe: Fighter | nu
   const firstAttack = def.type === "attack" && combat.attacksThisTurn === 1;
   if (def.special === "stitchFire" && foe) {
     const times = combat.player.status.evasion > 0 ? 3 : 2;
-    const dealt = playerAttack(run, [foe], Array.from({ length: times }, () => 3), firstAttack);
+    const dealt = playerAttack(run, [foe], Array.from({ length: times }, () => 4), firstAttack);
     notes.push(`${dealt} damage`);
     return true;
   }
@@ -309,7 +309,7 @@ function resolveSpecial(run: RunState, rng: RNG, def: CardDef, foe: Fighter | nu
     return true;
   }
   if (def.special === "merge" && foe) {
-    const amount = foe.status.locked > 0 ? 22 : 14;
+    const amount = foe.status.locked > 0 ? 24 : 16;
     const dealt = playerAttack(run, [foe], [amount], firstAttack);
     notes.push(`${dealt} damage`);
     return true;
@@ -318,8 +318,8 @@ function resolveSpecial(run: RunState, rng: RNG, def: CardDef, foe: Fighter | nu
     const dealt = playerAttack(run, [foe], [8], firstAttack);
     notes.push(`${dealt} damage`);
     if (combat.player.status.evasion > 0 && foe.hp > 0) {
-      applyLocked(run, rng, foe, 2);
-      notes.push("Lock 2");
+      applyLocked(run, rng, foe, 1);
+      notes.push("Lock 1");
     }
     return true;
   }
@@ -332,7 +332,7 @@ function resolveSpecial(run: RunState, rng: RNG, def: CardDef, foe: Fighter | nu
     return true;
   }
   if (def.special === "burnThrough" && foe) {
-    const amount = foe.status.jam > 0 ? 14 : 7;
+    const amount = foe.status.jam > 0 ? 16 : 8;
     const dealt = playerAttack(run, [foe], [amount], firstAttack);
     notes.push(`${dealt} damage`);
     return true;
@@ -664,8 +664,8 @@ export function beginPlayerTurn(run: RunState) {
     selfHarm(run, 1);
   }
   if (combat.outcome === "fight" && has(run, "warpedIntake")) {
-    log(run, "Warped Intake bites for 3.");
-    selfHarm(run, 3);
+    log(run, "Warped Intake bites for 1.");
+    selfHarm(run, 1);
   }
   if (combat.outcome !== "fight" || run.hp <= 0) {
     combat.outcome = "lost";
@@ -688,11 +688,11 @@ export function beginPlayerTurn(run: RunState) {
   const drawn = draw(run, rng, Math.max(0, drawCount));
   log(run, `Turn ${combat.turn}. Draw ${drawn}. Energy ${combat.energy}.`);
   for (let i = 0; i < powerCount(run, "hotStart"); i++) combat.energy += 1;
-  if (has(run, "mothDust")) combat.player.status.evasion += 1;
+  if (has(run, "mothDust") && combat.turn % 3 === 1) combat.player.status.evasion += 1;
   for (let i = 0; i < powerCount(run, "trimAuthority"); i++) combat.player.status.evasion += 1;
   for (let i = 0; i < powerCount(run, "lowObservable"); i++) combat.player.status.evasion += 1;
   const lead = livingEnemies(run)[0];
-  if (lead && has(run, "spectrumMast")) lead.status.jam += 1;
+  if (lead && has(run, "spectrumMast")) lead.status.jam += 2;
   if (powerCount(run, "ecmWing")) {
     for (const enemy of livingEnemies(run)) enemy.status.jam += powerCount(run, "ecmWing");
   }
@@ -705,7 +705,7 @@ export function beginPlayerTurn(run: RunState) {
     log(run, `Anvil Protocol raises ${shield} Shield.`);
   }
   if (has(run, "rwrBulb") && livingEnemies(run).some((enemy) => enemyPlan(run, enemy).damage > 0)) {
-    const shield = gainShield(run, 4);
+    const shield = gainShield(run, 3);
     log(run, `RWR Bulb throws ${shield} Shield.`);
   }
   saveRng(run, rng);
@@ -725,7 +725,7 @@ export function openCombat(
   run.uid = uid;
   for (const enemy of enemies) {
     if (has(run, "hauntedPump")) enemy.status.thrust += 1;
-    if (has(run, "paperSeals")) enemy.status.armor += 2;
+    if (has(run, "paperSeals")) enemy.status.armor += 3;
   }
   const deck = run.deck.map((card) => ({ ...card }));
   run.combat = {
@@ -797,7 +797,7 @@ export function performPlayCard(run: RunState, handIndex: number, targetUid: num
   }
   if (def.type === "maneuver" && combat.outcome === "fight") {
     if (firstManeuver && has(run, "chaffLoader")) notes.push(`chaff +${gainShield(run, 4)} Shield`);
-    for (let i = 0; i < powerCount(run, "countermeasures"); i++) notes.push(`+${gainShield(run, 3)} Shield`);
+    for (let i = 0; i < powerCount(run, "countermeasures"); i++) notes.push(`+${gainShield(run, 2)} Shield`);
     if (has(run, "memorialTag")) {
       const gained = heal(run, 1);
       if (gained) notes.push("heal 1");
@@ -821,9 +821,9 @@ export function performEndTurn(run: RunState) {
   if (!combat || combat.outcome !== "fight") return;
   if (combat.powers.includes("patience") && combat.attacksThisTurn === 0) {
     const copies = powerCount(run, "patience");
-    combat.player.status.evasion += 3 * copies;
+    combat.player.status.evasion += 2 * copies;
     const shield = gainShield(run, 5 * copies);
-    log(run, `Patience: +${3 * copies} Evasion, +${shield} Shield.`);
+    log(run, `Patience: +${2 * copies} Evasion, +${shield} Shield.`);
   }
   if (has(run, "bingoCard") && combat.energy === 0) {
     const shield = gainShield(run, 5);

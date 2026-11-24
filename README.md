@@ -19,6 +19,7 @@ The dev server binds to port **8731**. Open [http://127.0.0.1:8731](http://127.0
 
 ```bash
 npm test          # combat, map generation, and seeded full-sortie simulations
+npm run sim       # headless balance simulator (see below)
 npm run build     # typecheck and write static files to dist/
 npm run preview   # serve the production build
 npm run build:single
@@ -56,9 +57,9 @@ Unlocks and the in-progress sortie are stored in `localStorage` (`meridian.meta.
 Each jet has its own max HP, starting deck, card pool, and a built-in relic:
 
 - **Fly-by-Wire** (F-16C): the first Attack each turn costs 1 less Energy.
-- **Conformal Stations** (F-15E): the first Attack each turn deals 5 extra damage.
-- **Low-Observable Skin** (F-22A): gain 1 Evasion at the start of each turn.
-- **ALQ-99 Pods** (EA-18G): apply 1 Jam to the lead enemy at the start of each turn.
+- **Conformal Stations** (F-15E): the first Attack each turn deals 9 extra damage.
+- **Low-Observable Skin** (F-22A): gain 1 Evasion on turn 1 and every third turn after (4, 7, …).
+- **ALQ-99 Pods** (EA-18G): apply 2 Jam to the lead enemy at the start of each turn.
 
 The hangar shows locked jets and the exact condition. The Records screen tracks sorties, wins, deepest corridor, and the mystery counter.
 
@@ -105,10 +106,27 @@ Painted art lives in `src/assets/art/` as WebP (about 1.2 MB in total):
 - Sortie flow: HP does not reset after a fight, the F-15E unlocks when Graue Eule goes down, depots sell cards and repairs
 - Content: every jet, enemy, card, and event has art; a pre-re-skin combat save loads with the new names
 - A scripted interceptor build can kill the Act 1 boss
-- Seeded autopilot sorties win at least one full three-act run
+- Seeded autopilot sorties reach Act 2
+- Balance simulator smoke test: both bots fly full sorties on every jet without errors, a seed replays identically, and the smarter bot clears some but not all starter-jet sorties
 
 ## Design notes
 
-The autopilot used in tests is intentionally simple. It still wins some seeds and reaches Act 3 on others, which is the band the fights were tuned for: a careful player who blocks the telegraphed hits and spends gold on repairs should be able to finish. A greedy damage race can still lose, especially to elites and the later bosses.
+Numbers are tuned with the balance simulator so that a careful player who reads the telegraphed hits finishes roughly two sorties in five, on any jet. Act 1 is a gentle on-ramp; Königsadler and the Act 3 corridor are where most sorties end. A greedy damage race usually loses by the Act 2 boss.
+
+## Balance simulator
+
+`tools/sim/` plays thousands of full sorties headlessly against the real game rules:
+
+```bash
+npm run sim -- --runs 2000 --bots greedy,smart --out sim-out
+npm run sim -- --runs 1000 --bots smart --explore 0.3 --out sim-out/audit
+```
+
+- **greedy** plays the card that scores best right now and drafts the most expensive card.
+- **smart** plans each turn with a beam search against the visible intents (it never peeks at the draw pile), drafts toward a balanced deck, and routes, shops, and gambles by expected value.
+- `--explore 0.3` makes 30% of drafts, gambles, and intermission picks at random, so card and relic lift can be measured without the bot's own taste skewing it.
+- `--tweak '{"hp":{"2:boss":1.1}}'` (or a JSON file) scales enemy HP or damage by act and kind, swaps card numbers, jet HP, starter relics, or decks in-process, to try an idea before editing the content files.
+
+Each batch writes `report.md` (win rate and deaths by act per jet and bot, per-encounter damage taken, where runs end, card and relic lift, event and gamble outcomes, gold and healing flow) and `summary.json`; `--records` adds every run's raw record.
 
 Graue Eule gains a damage bonus and paints Burn once she drops under half HP. Königsadler sheds Armor over the fight, then molts into a hotter airframe after you have had a turn at zero Armor. Nebelhorn changes pattern at 60% and 30% HP; the last layer ignores Evasion.

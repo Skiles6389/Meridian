@@ -27,7 +27,7 @@ export const RELICS: RelicDef[] = [
     kind: "starter",
     jet: "bulwark",
     price: 0,
-    text: "The first Attack you play each turn deals 5 extra damage.",
+    text: "The first Attack you play each turn deals 9 extra damage.",
   },
   {
     id: "mothDust",
@@ -35,7 +35,7 @@ export const RELICS: RelicDef[] = [
     kind: "starter",
     jet: "moth",
     price: 0,
-    text: "At the start of your turn, gain 1 Evasion.",
+    text: "On turn 1 and every third turn after (4, 7, …), gain 1 Evasion.",
   },
   {
     id: "spectrumMast",
@@ -43,7 +43,7 @@ export const RELICS: RelicDef[] = [
     kind: "starter",
     jet: "lattice",
     price: 0,
-    text: "At the start of your turn, apply 1 Jam to the lead enemy.",
+    text: "At the start of your turn, apply 2 Jam to the lead enemy.",
   },
   {
     id: "auxTank",
@@ -64,7 +64,7 @@ export const RELICS: RelicDef[] = [
     name: "Stabilators",
     kind: "buff",
     price: 124,
-    text: "Whenever you gain Shield, gain 2 more.",
+    text: "Whenever you gain Shield, gain 1 more.",
   },
   {
     id: "hotNozzle",
@@ -134,7 +134,7 @@ export const RELICS: RelicDef[] = [
     name: "RWR Bulb",
     kind: "buff",
     price: 126,
-    text: "At the start of your turn, if an enemy is about to attack, gain 4 Shield.",
+    text: "At the start of your turn, if an enemy is about to attack, gain 3 Shield.",
   },
   {
     id: "thirdDetent",
@@ -147,7 +147,7 @@ export const RELICS: RelicDef[] = [
     id: "busTie",
     name: "Bus Tie",
     kind: "buff",
-    price: 188,
+    price: 215,
     text: "You have +1 maximum Energy.",
   },
   {
@@ -176,28 +176,28 @@ export const RELICS: RelicDef[] = [
     name: "Warped Intake",
     kind: "curse",
     price: 0,
-    text: "Curse. Gain 1 Energy each turn. At the start of your turn, take 3 damage.",
+    text: "Curse. Gain 1 Energy each turn. At the start of your turn, take 1 damage.",
   },
   {
     id: "leadBallast",
     name: "Lead Ballast",
     kind: "curse",
     price: 0,
-    text: "Curse. Your Attacks deal 3 extra damage. Draw 1 fewer card each turn.",
+    text: "Curse. Your Attacks deal 4 extra damage. Draw 1 fewer card each turn.",
   },
   {
     id: "crackedCanopy",
     name: "Cracked Canopy",
     kind: "curse",
     price: 0,
-    text: "Curse. +12 max HP. Lose 1 HP at the start of each of your turns.",
+    text: "Curse. +18 max HP. Lose 1 HP at the start of each of your turns.",
   },
   {
     id: "smokedOptics",
     name: "Smoked Optics",
     kind: "curse",
     price: 0,
-    text: "Curse. Your Attacks deal 4 extra damage. Shield you gain is reduced by 2.",
+    text: "Curse. Your Attacks deal 4 extra damage. Shield you gain is reduced by 1.",
   },
   {
     id: "hauntedPump",
@@ -211,7 +211,7 @@ export const RELICS: RelicDef[] = [
     name: "Paper Seals",
     kind: "curse",
     price: 0,
-    text: "Curse. Draw 1 extra card each turn. Enemies start each fight with 2 Armor.",
+    text: "Curse. Draw 1 extra card each turn. Enemies start each fight with 3 Armor.",
   },
 ];
 
