@@ -837,12 +837,19 @@ export function performEndTurn(run: RunState) {
   beginPlayerTurn(run);
 }
 
+/**
+ * A sandbox copy for previews. Combat only ever writes to the combat state,
+ * hp, the rng, uids, and the tally, so the map, deck, and relics are shared.
+ */
+export function scratchCopy(run: RunState): RunState {
+  return { ...run, combat: run.combat ? structuredClone(run.combat) : null, tally: { ...run.tally }, scratch: true };
+}
+
 export function enemyPlan(run: RunState, enemy: Fighter): Plan {
   if (!run.combat || enemy.hp <= 0) {
     return { kind: "down", title: "Down", damage: 0, hits: 0, perHit: 0, uneven: false, shield: 0, tags: [] };
   }
-  const clone = structuredClone(run);
-  clone.scratch = true;
+  const clone = scratchCopy(run);
   const twin = clone.combat?.enemies.find((candidate) => candidate.uid === enemy.uid);
   if (!twin) {
     return { kind: "down", title: "Down", damage: 0, hits: 0, perHit: 0, uneven: false, shield: 0, tags: [] };
@@ -888,8 +895,7 @@ export function enemyPlan(run: RunState, enemy: Fighter): Plan {
 
 export function forecastLoss(run: RunState): number {
   if (!run.combat || run.combat.outcome !== "fight") return 0;
-  const clone = structuredClone(run);
-  clone.scratch = true;
+  const clone = scratchCopy(run);
   const before = clone.hp;
   performEndTurn(clone);
   return Math.max(0, before - clone.hp);
