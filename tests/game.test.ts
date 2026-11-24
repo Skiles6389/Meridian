@@ -4,12 +4,12 @@ import { performEndTurn, performPlayCard, startEncounter } from "../src/game/com
 import { ENCOUNTERS, ENEMIES } from "../src/game/enemies";
 import { EVENTS } from "../src/game/events";
 import { JET_ORDER, JETS } from "../src/game/jets";
-import { freshMeta } from "../src/game/meta";
+import { freshMeta, migrateRun } from "../src/game/meta";
 import { generateMap, mapIsConnected } from "../src/game/map";
 import { RELICS } from "../src/game/relics";
 import { RNG } from "../src/game/rng";
 import { ackReward, buyShopCard, buyShopHeal, createRun, enterNode, openRemoval, playCard, removeCard } from "../src/game/run";
-import { jetSvg } from "../src/game/silhouettes";
+import { cardTheme, CARD_ART, EVENT_ART, hasJetArt } from "../src/ui/art";
 import type { RunState } from "../src/game/types";
 
 function boot(seed = 7, jet: "kite" | "bulwark" | "moth" | "lattice" = "kite") {
@@ -177,13 +177,36 @@ describe("content", () => {
     expect(EVENTS.length).toBeGreaterThanOrEqual(8);
     expect(JET_ORDER).toHaveLength(4);
     for (const jet of JET_ORDER) {
-      expect(jetSvg(JETS[jet].silhouette, JETS[jet].accent)).toContain("<svg");
+      expect(hasJetArt(JETS[jet].silhouette)).toBe(true);
       for (const id of JETS[jet].deck) getCard(id);
     }
-    for (const enemy of ENEMIES) expect(jetSvg(enemy.silhouette, enemy.accent, true)).toContain("<svg");
+    for (const enemy of ENEMIES) expect(hasJetArt(enemy.silhouette)).toBe(true);
+    for (const card of CARDS) expect(CARD_ART[cardTheme(card.id)]).toBeTruthy();
+    for (const event of EVENTS) expect(EVENT_ART[event.id]).toBeTruthy();
     for (const encounter of ENCOUNTERS) {
       expect(encounter.foes.length).toBeGreaterThan(0);
       for (const foe of encounter.foes) expect(ENEMIES.some((enemy) => enemy.id === foe.id)).toBe(true);
     }
+  });
+});
+
+describe("saves", () => {
+  it("refreshes display names on a combat saved before the re-skin", () => {
+    const { meta, run } = boot(11);
+    const start = run.map.nodes.find((node) => node.row === 0)!;
+    expect(enterNode(run, meta, start.id).ok).toBe(true);
+    const saved = JSON.parse(JSON.stringify(run)) as RunState;
+    saved.combat!.encounterName = "Old contact";
+    for (const fighter of saved.combat!.enemies) {
+      fighter.name = "Old name";
+      fighter.silhouette = "f16";
+    }
+    const loaded = migrateRun(saved);
+    expect(loaded.combat!.encounterName).toBe(run.combat!.encounterName);
+    loaded.combat!.enemies.forEach((fighter, index) => {
+      expect(fighter.name).toBe(run.combat!.enemies[index].name);
+      expect(fighter.silhouette).toBe(run.combat!.enemies[index].silhouette);
+      expect(fighter.hp).toBe(run.combat!.enemies[index].hp);
+    });
   });
 });

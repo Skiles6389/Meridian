@@ -20,65 +20,69 @@ function copies(id: string, n: number): string[] {
   return Array.from({ length: n }, () => id);
 }
 
+/**
+ * Internal ids (kite, bulwark, moth, lattice) predate the real-aircraft reskin.
+ * They are kept so saved unlocks and sorties load unchanged.
+ */
 export const JETS: Record<JetId, JetDef> = {
   kite: {
     id: "kite",
-    code: "CF-9",
-    name: "Kite",
-    role: "Interceptor",
-    maker: "Calder Flightworks",
-    callsign: "CALDER 9",
+    code: "F-16C",
+    name: "Fighting Falcon",
+    role: "Multirole fighter",
+    maker: "General Dynamics",
+    callsign: "VIPER 1",
     hp: 70,
-    blurb: "A light interceptor with more control surface than sense. It wins by getting the first nose around.",
-    play: "Cheap attacks, Evasion, and extra draws. Vector Vanes discounts your first Attack each turn.",
+    blurb: "The lightweight fighter that out-turned its own spec sheet. Fly-by-wire, a bubble canopy, and a nose that comes around first.",
+    play: "Cheap attacks, Evasion, and extra draws. Fly-by-Wire discounts your first Attack each turn.",
     relic: "vectorVanes",
     deck: [...copies("gunBurst", 4), ...copies("flarePop", 4), "snapTurn", "probeLock"],
-    silhouette: "kite",
+    silhouette: "f16",
     accent: "#3ee0c5",
   },
   bulwark: {
     id: "bulwark",
-    code: "AS-4",
-    name: "Bulwark",
+    code: "F-15E",
+    name: "Strike Eagle",
     role: "Strike fighter",
-    maker: "Ardent Systems",
-    callsign: "ARDENT 4",
+    maker: "McDonnell Douglas",
+    callsign: "MUDHEN 2",
     hp: 86,
-    blurb: "A heavy striker that treats the merge like a loading dock. It arrives with more iron than the runway liked.",
-    play: "Big missiles, thick Shield, and Armor. Ordnance Bay adds damage to your first Attack each turn.",
+    blurb: "Two crew, two engines, conformal tanks, and more ordnance than the runway liked. It treats the merge like a loading dock.",
+    play: "Big missiles, thick Shield, and Armor. Conformal Stations add damage to your first Attack each turn.",
     relic: "ordnanceBay",
     deck: [...copies("gunBurst", 4), ...copies("flarePop", 3), ...copies("armorCheck", 2), "ironDart"],
-    silhouette: "bulwark",
+    silhouette: "f15e",
     accent: "#f0a35e",
   },
   moth: {
     id: "moth",
-    code: "VX-7",
-    name: "Moth",
-    role: "Stealth jet",
-    maker: "Vesper Experimental",
-    callsign: "VESPER 7",
+    code: "F-22A",
+    name: "Raptor",
+    role: "Stealth air superiority",
+    maker: "Lockheed Martin",
+    callsign: "RAPTOR 3",
     hp: 64,
-    blurb: "A quiet demonstrator that would rather not be in the picture. When it is, the picture ends.",
-    play: "Evasion and setup. Moth Dust grants 1 Evasion at the start of every turn.",
+    blurb: "Supercruise, thrust vectoring, and a radar return the size of a marble. When it is in the picture, the picture ends.",
+    play: "Evasion and setup. Low-Observable Skin grants 1 Evasion at the start of every turn.",
     relic: "mothDust",
     deck: [...copies("gunBurst", 3), ...copies("flarePop", 4), "fade", "silentPing", "holdFire"],
-    silhouette: "moth",
+    silhouette: "f22",
     accent: "#c3b0ff",
   },
   lattice: {
     id: "lattice",
-    code: "EW-2",
-    name: "Lattice",
+    code: "EA-18G",
+    name: "Growler",
     role: "Electronic warfare",
-    maker: "Helion Dynamics",
-    callsign: "HELION 2",
+    maker: "Boeing",
+    callsign: "GROWLER 4",
     hp: 74,
-    blurb: "An electronic-warfare jet that fights the other aircraft's instruments first and the aircraft second.",
-    play: "Jam, Locked, and card draw. Spectrum Mast jams the lead enemy every turn.",
+    blurb: "A Super Hornet that traded guns for jamming pods. It fights the other aircraft's instruments first and the aircraft second.",
+    play: "Jam, Locked, and card draw. ALQ-99 Pods jam the lead enemy every turn.",
     relic: "spectrumMast",
     deck: [...copies("gunBurst", 3), ...copies("flarePop", 3), "noiseBarrage", "designator", ...copies("patchCycle", 2)],
-    silhouette: "lattice",
+    silhouette: "ea18g",
     accent: "#8ebfff",
   },
 };
@@ -87,7 +91,7 @@ export const JET_ORDER: JetId[] = ["kite", "bulwark", "moth", "lattice"];
 
 export function unlockBlurb(id: JetId, mysteries: number): string {
   if (id === "kite") return "On the line from the first briefing.";
-  if (id === "bulwark") return "Defeat the Act 1 boss, Graue Eule.";
+  if (id === "bulwark") return "Defeat the Act 1 boss, the Phantom “Graue Eule”.";
   if (id === "moth") return "Win a full sortie — clear Act 3.";
   return `Resolve 5 mystery events across sorties (${mysteries}/5).`;
 }

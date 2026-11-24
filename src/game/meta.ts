@@ -1,3 +1,5 @@
+import { getEncounter, getEnemy } from "./enemies";
+import type { FoeSpawn } from "./enemies";
 import type { JetId, Meta, MetaStats, RunState } from "./types";
 
 export const META_KEY = "meridian.meta.v1";
@@ -63,16 +65,48 @@ export function saveMeta(meta: Meta): void {
   }
 }
 
+/**
+ * Saves written before the real-aircraft reskin carry the old display names
+ * and art ids inside an in-progress fight. Ids are unchanged, so refresh the
+ * presentation fields from the current definitions.
+ */
+export function migrateRun(run: RunState): RunState {
+  run.scratch = false;
+  run.route = run.route ?? (run.nodeId ? [run.nodeId] : []);
+  run.notices = run.notices ?? [];
+  const combat = run.combat;
+  if (combat) {
+    let foes: FoeSpawn[] = [];
+    try {
+      const encounter = getEncounter(combat.encounterId);
+      combat.encounterName = encounter.name;
+      foes = encounter.foes;
+    } catch {
+      foes = [];
+    }
+    combat.enemies.forEach((fighter, index) => {
+      try {
+        const def = getEnemy(fighter.defId);
+        const spawn = foes[index]?.id === fighter.defId ? foes[index] : undefined;
+        fighter.name = spawn?.name ?? def.name;
+        fighter.epithet = def.epithet;
+        fighter.silhouette = def.silhouette;
+        fighter.accent = def.accent;
+      } catch {
+        /* unknown enemy ids are left as saved */
+      }
+    });
+  }
+  return run;
+}
+
 export function loadRun(): RunState | null {
   const raw = storage()?.getItem(RUN_KEY);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as RunState;
     if (parsed.version !== 1 || !parsed.deck || !parsed.map) return null;
-    parsed.scratch = false;
-    parsed.route = parsed.route ?? (parsed.nodeId ? [parsed.nodeId] : []);
-    parsed.notices = parsed.notices ?? [];
-    return parsed;
+    return migrateRun(parsed);
   } catch {
     return null;
   }

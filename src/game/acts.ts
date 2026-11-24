@@ -10,16 +10,16 @@ export const ACTS: Record<ActId, ActInfo> = {
   1: {
     id: 1,
     name: "Baltic Shelf",
-    blurb: "Patrol lanes over cold water. The Graukreis are still warming their engines.",
+    blurb: "Patrol lanes over a storm-tossed sea. The Graukreis aggressor wing is still warming its Starfighters.",
   },
   2: {
     id: 2,
     name: "Rhine Gate",
-    blurb: "Veteran wings hold the river corridor. Expect heavier airframes.",
+    blurb: "Tornados and Fulcrums hold the river corridor at dusk. Expect heavier airframes.",
   },
   3: {
     id: 3,
     name: "Glass Meridian",
-    blurb: "Experimental plots. The last line before the coast goes dark.",
+    blurb: "High above the cloud deck, under the aurora. Typhoons and Lightnings guard the last line.",
   },
 };
