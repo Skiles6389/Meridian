@@ -29,6 +29,8 @@ export function freshMeta(): Meta {
     unlocked: { kite: true, bulwark: false, moth: false, lattice: false },
     stats: emptyStats(),
     mute: false,
+    musicVol: 0.6,
+    sfxVol: 0.8,
   };
 }
 
@@ -39,6 +41,10 @@ function storage(): Storage | null {
   } catch {
     return null;
   }
+}
+
+function volume(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
 }
 
 export function loadMeta(): Meta {
@@ -52,6 +58,8 @@ export function loadMeta(): Meta {
       ...parsed,
       unlocked: { ...freshMeta().unlocked, ...parsed.unlocked },
       stats: { ...emptyStats(), ...parsed.stats },
+      musicVol: volume(parsed.musicVol, 0.6),
+      sfxVol: volume(parsed.sfxVol, 0.8),
     };
   } catch {
     return freshMeta();

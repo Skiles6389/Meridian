@@ -281,6 +281,10 @@ export interface Meta {
   unlocked: Record<JetId, boolean>;
   stats: MetaStats;
   mute: boolean;
+  /** Music volume, 0..1. */
+  musicVol: number;
+  /** Sound-effects volume, 0..1. */
+  sfxVol: number;
 }
 
 export interface Plan {
