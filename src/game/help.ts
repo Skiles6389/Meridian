@@ -10,16 +10,16 @@ export const HELP: HelpPage[] = [
       "Meridian is a three-corridor deck sortie. You fly one jet, spend Energy on cards, and try to bring the airframe home.",
       "Act 1 is the Baltic Shelf, Act 2 is the Rhine Gate, Act 3 is the Glass Meridian. Clear the boss and the next map is generated. Clear Nebelhorn and the sortie is won.",
       "HP carries between fights. Nothing heals you unless a card, a relic, a depot, a reward, or an event says so.",
-      "Every airframe, squadron, and marking in this game is fictional. No historical insignia are used.",
+      "The aircraft are real types. Every squadron, callsign, and story is fictional. Markings are neutral, with no national or historical insignia.",
     ],
   },
   {
     title: "Your turn",
     lines: [
       "You start each turn with 3 Energy (more, if a relic says so) and draw 5 cards. The hand holds 10.",
-      "Play Attacks, Maneuvers, and Systems by spending Energy. Then press End Turn. Enemies act in the order shown, using the intent above each jet.",
+      "Click a card to play it, or drag it onto a target. Spend Energy from the orb, then press End Turn. Enemies act left to right, using the intent shown above each jet.",
       "Shield disappears when your next turn starts. It soaks attack damage. It does not stop Burn.",
-      "Keys: 1–9 play a card, E or Enter ends the turn, Esc closes a panel.",
+      "Keys: 1–9 play a card, E or Enter ends the turn, Esc closes a panel. On a phone, tap a card to inspect it and tap again (or tap a target) to play.",
     ],
   },
   {
@@ -51,10 +51,10 @@ export const HELP: HelpPage[] = [
   {
     title: "Jets and unlocks",
     lines: [
-      "CF-9 Kite, the interceptor, is ready at the first briefing.",
-      "AS-4 Bulwark unlocks when you defeat the Act 1 boss, Graue Eule.",
-      "VX-7 Moth unlocks when you win a full sortie.",
-      "EW-2 Lattice unlocks when you have resolved 5 mystery events across sorties.",
+      "F-16C Fighting Falcon, the nimble multirole fighter, is ready at the first briefing.",
+      "F-15E Strike Eagle unlocks when you defeat the Act 1 boss, the Phantom “Graue Eule”.",
+      "F-22A Raptor unlocks when you win a full sortie.",
+      "EA-18G Growler unlocks when you have resolved 5 mystery events across sorties.",
       "Unlocks and the current sortie are stored in this browser.",
     ],
   },

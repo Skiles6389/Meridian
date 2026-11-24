@@ -15,7 +15,7 @@ export interface RelicDef {
 export const RELICS: RelicDef[] = [
   {
     id: "vectorVanes",
-    name: "Vector Vanes",
+    name: "Fly-by-Wire",
     kind: "starter",
     jet: "kite",
     price: 0,
@@ -23,7 +23,7 @@ export const RELICS: RelicDef[] = [
   },
   {
     id: "ordnanceBay",
-    name: "Ordnance Bay",
+    name: "Conformal Stations",
     kind: "starter",
     jet: "bulwark",
     price: 0,
@@ -31,7 +31,7 @@ export const RELICS: RelicDef[] = [
   },
   {
     id: "mothDust",
-    name: "Moth Dust",
+    name: "Low-Observable Skin",
     kind: "starter",
     jet: "moth",
     price: 0,
@@ -39,7 +39,7 @@ export const RELICS: RelicDef[] = [
   },
   {
     id: "spectrumMast",
-    name: "Spectrum Mast",
+    name: "ALQ-99 Pods",
     kind: "starter",
     jet: "lattice",
     price: 0,

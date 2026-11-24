@@ -4,31 +4,27 @@ export type CardType = "attack" | "maneuver" | "system" | "burden";
 export type Rarity = "starter" | "common" | "uncommon" | "rare" | "burden";
 export type Pool = "shared" | JetId;
 export type NodeType = "battle" | "elite" | "shop" | "mystery" | "gamble" | "boss";
+/** Painted airframe art, one per real aircraft type (plus boss liveries). */
 export type SilhouetteId =
-  | "kite"
-  | "bulwark"
-  | "moth"
-  | "lattice"
-  | "habicht"
-  | "kiebitz"
-  | "dachs"
-  | "luchs"
-  | "rabe"
-  | "moorhau"
-  | "falke"
-  | "nachtigall"
-  | "bernstein"
-  | "marder"
-  | "zwilling"
-  | "hochbahn"
-  | "spiegel"
-  | "gewitter"
-  | "eisenwal"
-  | "schwarz"
-  | "weiss"
-  | "eule"
-  | "adler"
-  | "nebel";
+  | "f16"
+  | "f15e"
+  | "f22"
+  | "ea18g"
+  | "f104"
+  | "alphajet"
+  | "f4f"
+  | "f4f_boss"
+  | "mig29"
+  | "tornado_ids"
+  | "tornado_ecr"
+  | "tornado_marine"
+  | "typhoon"
+  | "typhoon_boss"
+  | "f35"
+  | "f35_boss";
+
+/** Paint variations applied over shared airframe art. */
+export type Livery = "" | "olive" | "green" | "night" | "steel" | "splinter" | "glass" | "storm" | "iron" | "frost";
 
 export type BossId = "" | "eule" | "adler" | "nebel";
 
