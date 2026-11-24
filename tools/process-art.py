@@ -22,7 +22,7 @@ JETS = [
     "f16", "f15e", "f22", "ea18g",
     "f104", "alphajet", "f4f", "f4f_boss", "mig29",
     "tornado_ids", "tornado_ecr", "tornado_marine",
-    "typhoon", "typhoon_boss", "f35", "f35_boss",
+    "typhoon", "typhoon_boss", "f35", "f35_boss", "a10",
 ]
 
 # Nozzle (afterburner) positions in raw 1280x720 pixels, read off each painting.
@@ -31,7 +31,7 @@ NOZZLES = {
     "f104": (238, 403), "alphajet": (300, 411), "f4f": (376, 459), "f4f_boss": (335, 422),
     "mig29": (276, 465), "tornado_ids": (254, 420), "tornado_ecr": (284, 431),
     "tornado_marine": (243, 425), "typhoon": (254, 444), "typhoon_boss": (274, 453),
-    "f35": (289, 397), "f35_boss": (310, 384),
+    "f35": (289, 397), "f35_boss": (310, 384), "a10": (390, 338),
 }
 
 
