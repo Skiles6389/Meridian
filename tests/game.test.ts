@@ -11,9 +11,9 @@ import { RELICS } from "../src/game/relics";
 import { RNG } from "../src/game/rng";
 import { ackReward, buyShopCard, buyShopHeal, createRun, enterNode, openRemoval, playCard, removeCard } from "../src/game/run";
 import { cardTheme, CARD_ART, EVENT_ART, hasJetArt } from "../src/ui/art";
-import type { RunState } from "../src/game/types";
+import type { JetId, RunState } from "../src/game/types";
 
-function boot(seed = 7, jet: "kite" | "bulwark" | "moth" | "lattice" = "kite") {
+function boot(seed = 7, jet: JetId = "kite") {
   const meta = freshMeta();
   const run = createRun(jet, seed, meta);
   return { meta, run };
@@ -203,7 +203,9 @@ describe("content", () => {
     expect(ENEMIES.length).toBeGreaterThanOrEqual(12);
     expect(ENEMIES.filter((enemy) => enemy.boss).length).toBe(3);
     expect(EVENTS.length).toBeGreaterThanOrEqual(8);
-    expect(JET_ORDER).toHaveLength(4);
+    expect(JET_ORDER).toHaveLength(5);
+    expect(EVENTS.length).toBeGreaterThanOrEqual(18);
+    expect(ENCOUNTERS.filter((encounter) => encounter.kind === "elite")).toHaveLength(9);
     for (const jet of JET_ORDER) {
       expect(hasJetArt(JETS[jet].silhouette)).toBe(true);
       for (const id of JETS[jet].deck) getCard(id);

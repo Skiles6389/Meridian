@@ -81,6 +81,10 @@ const POWER_WORTH: Record<string, number> = {
   lowObservable: 6,
   predictiveTrack: 3,
   ecmWing: 8,
+  loiter: 4,
+  manualReversion: 4,
+  closeAirSupport: 6,
+  survivability: 7,
 };
 
 export interface Weights {
@@ -114,7 +118,7 @@ function evaluate(state: RunState, w: Weights, bonus: number): number {
     score += enemy.status.locked * 2.5 + (enemy.status.burn * (enemy.status.burn + 1)) / 2;
   }
   const status = after.player.status;
-  score += status.evasion * 3 + status.thrust * 4 + status.armor * 4 - status.burn * 2;
+  score += status.evasion * 3 + status.thrust * 4 + status.armor * 4 + (status.plating ?? 0) * 1.1 - status.burn * 2;
   for (const power of after.powers) score += POWER_WORTH[power] ?? 3;
   return score + bonus;
 }
@@ -363,6 +367,33 @@ function eventPreference(run: RunState, smart: boolean): string[] {
     case "wingman":
       if (smart && hp > 0.8) return ["rescue", "scavenge"];
       return run.relics.includes("memorialTag") ? ["scavenge"] : ["memorial", "scavenge"];
+    case "tanker":
+      if (hp < 0.7) return ["plug"];
+      if (smart) return !run.relics.includes("dropTank") && hp > 0.75 ? ["droptank", "gossip"] : ["gossip", "plug"];
+      return ["droptank", "plug"];
+    case "gateguard":
+      if (smart && low) return ["salute", "camera"];
+      return run.relics.includes("gunCamera") ? ["plaque", "salute"] : ["camera", "salute"];
+    case "airshow":
+      if (!smart) return ["display", "static"];
+      if (low) return ["static"];
+      return hp > 0.7 ? ["display", "static"] : worstCard(run) !== null ? ["hangar", "static"] : ["static"];
+    case "thunderhead":
+      if (!smart) return ["thread", "climb", "divert"];
+      if (hp < 0.5 && run.gold >= 25) return ["divert", "climb"];
+      return hp > 0.7 ? ["climb", "divert"] : ["divert", "climb"];
+    case "simbay":
+      if (smart && low) return ["nap"];
+      return run.gold >= (smart ? 100 : 60) ? ["syllabus", "drills"] : ["drills"];
+    case "fuelcash":
+      if (!smart) return ["sell", "report"];
+      if (run.gold >= 60 && !low) return ["buy", "report"];
+      return low ? ["report"] : ["sell", "report"];
+    case "numbers":
+      return smart && low ? ["off"] : ["copy", "report"];
+    case "stray":
+      if (!smart) return hp > 0.5 ? ["lead", "swap"] : ["swap", "vector"];
+      return hp > 0.65 ? ["lead", "vector"] : ["vector"];
     default:
       return [];
   }

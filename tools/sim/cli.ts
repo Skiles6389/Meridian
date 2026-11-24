@@ -2,6 +2,7 @@
  * Headless balance simulator. Plays full sorties with heuristic bots and writes a report.
  *
  *   npm run sim -- --runs 2000 --bots greedy,smart --explore 0.3 --out sim-out
+ *   npm run sim -- --difficulty rookie        (or normal, or a Threat Level 1-10)
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -21,10 +22,19 @@ interface Job {
   bot: "greedy" | "smart";
   seed: number;
   explore: number;
+  difficulty: number;
 }
 
 export function seedFor(base: number, i: number): number {
   return (Math.imul(i + 1, 2654435761) + base) >>> 0 || 1;
+}
+
+function parseDifficulty(value: string | undefined): number {
+  if (!value || value === "normal") return 0;
+  if (value === "rookie") return -1;
+  const level = Number(value.replace(/^threat/i, ""));
+  if (!Number.isInteger(level) || level < -1 || level > 10) throw new Error(`Unknown difficulty ${value}`);
+  return level;
 }
 
 function parse(argv: string[]) {
@@ -42,7 +52,8 @@ function parse(argv: string[]) {
   }
   return {
     runs: Number(opts.runs ?? 200),
-    jets: (opts.jets ?? "kite,bulwark,moth,lattice").split(",") as JetId[],
+    jets: (opts.jets ?? "kite,bulwark,moth,lattice,hog").split(",") as JetId[],
+    difficulty: parseDifficulty(opts.difficulty),
     bots: (opts.bots ?? "greedy,smart").split(",") as Job["bot"][],
     explore: Number(opts.explore ?? 0),
     base: Number(opts.seed ?? 1),
@@ -57,7 +68,7 @@ function parse(argv: string[]) {
 async function main() {
   const opts = parse(process.argv.slice(2));
   const jobs: Job[] = [];
-  for (const bot of opts.bots) for (const jet of opts.jets) for (let i = 0; i < opts.runs; i++) jobs.push({ jet, bot, seed: seedFor(opts.base, i), explore: opts.explore });
+  for (const bot of opts.bots) for (const jet of opts.jets) for (let i = 0; i < opts.runs; i++) jobs.push({ jet, bot, seed: seedFor(opts.base, i), explore: opts.explore, difficulty: opts.difficulty });
   const started = Date.now();
   const records: RunRecord[] = [];
   const self = fileURLToPath(import.meta.url);
@@ -112,6 +123,6 @@ if (isMainThread) {
   if (workerData.tweak) applyTweak(workerData.tweak);
   const bots = { greedy: makeBot("greedy"), smart: makeBot("smart") };
   parentPort!.on("message", (chunk: Job[]) => {
-    parentPort!.postMessage(chunk.map((job) => simulateRun(job.jet, job.seed, bots[job.bot], { explore: job.explore })));
+    parentPort!.postMessage(chunk.map((job) => simulateRun(job.jet, job.seed, bots[job.bot], { explore: job.explore, difficulty: job.difficulty })));
   });
 }

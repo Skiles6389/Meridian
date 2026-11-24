@@ -15,6 +15,8 @@ const SPECIAL_VALUE: Record<string, number> = {
   burnThrough: 12,
   dataSpike: 9,
   cycleSteal: 14.5,
+  maverick: 15,
+  bathtubCharge: 9,
 };
 
 /** What a system card is worth over a typical fight once it is online. */
@@ -29,6 +31,10 @@ const POWER_VALUE: Record<string, number> = {
   lowObservable: 13,
   predictiveTrack: 8,
   ecmWing: 20,
+  loiter: 9,
+  manualReversion: 10,
+  closeAirSupport: 15,
+  survivability: 16,
 };
 
 function effectValue(effect: Effect): number {
@@ -61,6 +67,8 @@ function effectValue(effect: Effect): number {
       return n * 5;
     case "armor":
       return n * 5;
+    case "plating":
+      return n * 1;
     default:
       return 0;
   }
@@ -90,7 +98,7 @@ export type Role = "damage" | "defense" | "utility";
 export function cardRole(id: string): Role {
   const def = getCard(id);
   if (def.type === "attack") return "damage";
-  if (def.effects.some((effect) => effect.k === "shield" || effect.k === "evasion" || effect.k === "armor") || def.special === "holdFire") return "defense";
+  if (def.effects.some((effect) => effect.k === "shield" || effect.k === "evasion" || effect.k === "armor" || effect.k === "plating") || def.special === "holdFire") return "defense";
   return "utility";
 }
 
@@ -113,4 +121,6 @@ export const RELIC_VALUE: Record<string, number> = {
   noseArt: 2,
   depotStamp: 2,
   memorialTag: 3,
+  dropTank: 2,
+  gunCamera: 2,
 };

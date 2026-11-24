@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_THREAT, NORMAL, ROOKIE } from "../src/game/difficulty";
 import { JET_ORDER } from "../src/game/jets";
 import { makeBot } from "../tools/sim/bots";
 import { simulateRun } from "../tools/sim/runner";
@@ -9,11 +10,12 @@ const SEEDS = [11, 2027, 90210];
 
 function sane(record: RunRecord) {
   expect(record.fights.length).toBeGreaterThan(0);
+  const peakMaxHp = Math.max(record.maxHp, ...record.fights.map((fight) => fight.maxHp));
   expect(record.win || record.death !== null || record.stalled).toBe(true);
   for (const fight of record.fights) {
     expect(fight.hpBefore).toBeLessThanOrEqual(fight.maxHp);
     expect(fight.hpAfter).toBeGreaterThanOrEqual(0);
-    expect(fight.hpAfter).toBeLessThanOrEqual(record.maxHp);
+    expect(fight.hpAfter).toBeLessThanOrEqual(peakMaxHp);
     expect(fight.act).toBeGreaterThanOrEqual(1);
     expect(fight.act).toBeLessThanOrEqual(3);
   }
@@ -41,6 +43,32 @@ describe("balance simulator smoke", () => {
       expect(markdown(summary, "smoke")).toContain("Win rate");
     });
   }
+
+  for (const [label, difficulty] of [
+    ["Rookie", ROOKIE],
+    ["Threat 5", 5],
+    ["Threat 10", MAX_THREAT],
+  ] as const) {
+    it(`both bots play ${label} sorties on every jet without errors`, () => {
+      for (const kind of ["greedy", "smart"] as const) {
+        for (const jet of JET_ORDER) sane(simulateRun(jet, 4401, makeBot(kind), { difficulty }));
+      }
+    });
+  }
+
+  it("orders difficulties: Rookie is kinder than Normal, Threat 10 is harsher", () => {
+    const seeds = Array.from({ length: 12 }, (_, i) => (i + 1) * 104729);
+    const depth = (difficulty: number) =>
+      seeds.reduce((sum, seed) => {
+        const record = simulateRun("kite", seed, makeBot("greedy"), { difficulty });
+        return sum + record.fights.length + (record.win ? 20 : 0);
+      }, 0);
+    const rookie = depth(ROOKIE);
+    const normal = depth(NORMAL);
+    const threat = depth(MAX_THREAT);
+    expect(rookie).toBeGreaterThan(normal);
+    expect(normal).toBeGreaterThan(threat);
+  });
 
   it("replays a seed identically", () => {
     const a = simulateRun("kite", 4242, makeBot("smart"), { explore: 0.3 });

@@ -111,14 +111,16 @@ export interface RunRecord {
 export interface SimOptions {
   /** Chance that a draft, gamble, or intermission choice is made at random, to measure what choices are worth. */
   explore?: number;
+  /** -1 Rookie, 0 Normal, 1..10 Threat Level. */
+  difficulty?: number;
 }
 
 const screenOf = (run: RunState): RunScreen => run.screen;
 
 export function simulateRun(jet: JetId, seed: number, bot: Bot, options: SimOptions = {}): RunRecord {
   const meta = freshMeta();
-  meta.unlocked = { kite: true, bulwark: true, moth: true, lattice: true };
-  const run = createRun(jet, seed, meta);
+  meta.unlocked = { kite: true, bulwark: true, moth: true, lattice: true, hog: true };
+  const run = createRun(jet, seed, meta, options.difficulty ?? 0);
   const coin = new RNG((seed * 2654435761) >>> 0 || 7);
   const explore = options.explore ?? 0;
   const rec: RunRecord = {
