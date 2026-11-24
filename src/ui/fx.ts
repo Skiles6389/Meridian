@@ -275,7 +275,8 @@ export function banner(text: string, sub: string, cls = ""): Promise<void> {
   const el = spawn(`banner ${cls}`, 0, 0, `<div class="banner-inner"><b>${text}</b>${sub ? `<small>${sub}</small>` : ""}</div>`);
   const life = cls.includes("short") ? 1000 : 1700;
   drop(el, life);
-  return wait(life * 0.7);
+  const final = cls.includes("win") || cls.includes("loss");
+  return final ? new Promise((resolve) => window.setTimeout(resolve, life)) : wait(life * 0.7);
 }
 
 export function wipe() {

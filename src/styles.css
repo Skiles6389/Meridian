@@ -4420,7 +4420,7 @@ div.loot > span {
 
   .tray-left {
     left: 8px;
-    bottom: calc(var(--cw) * 1.2 + 4px);
+    bottom: calc(var(--cw) * 1.42 + 8px);
     gap: 8px;
     align-items: center;
   }
@@ -4452,7 +4452,7 @@ div.loot > span {
 
   .tray-right {
     right: 8px;
-    bottom: calc(var(--cw) * 1.2 + 4px);
+    bottom: calc(var(--cw) * 1.42 + 8px);
     flex-direction: row-reverse;
     align-items: center;
     gap: 8px;
