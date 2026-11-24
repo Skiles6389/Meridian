@@ -1,4 +1,4 @@
-type Cue = "click" | "play" | "attack" | "shield" | "heal" | "hurt" | "error" | "turn" | "win" | "lose" | "unlock";
+type Cue = "click" | "play" | "attack" | "shield" | "heal" | "hurt" | "error" | "turn" | "win" | "lose" | "unlock" | "whoosh";
 
 let ctx: AudioContext | null = null;
 let muted = false;
@@ -68,6 +68,10 @@ export function sfx(cue: Cue) {
   else if (cue === "hurt") tone(90, 0.16, "sawtooth", 0.05);
   else if (cue === "error") tone(140, 0.1, "square", 0.04);
   else if (cue === "turn") tone(300, 0.07, "triangle", 0.04);
+  else if (cue === "whoosh") {
+    noise(0.5, 0.045);
+    tone(160, 0.4, "sine", 0.02);
+  }
   else if (cue === "win") {
     [523, 659, 784, 1046].forEach((freq, i) => tone(freq, 0.14, "triangle", 0.05, i * 0.09));
   }

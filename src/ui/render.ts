@@ -510,7 +510,7 @@ function foeHtml(run: RunState, enemy: Fighter, index: number, app: AppState): s
   return `
     <div class="foe ${selected ? "selected" : ""} ${down ? "down" : ""} ${enemy.boss ? "boss" : ""} ${enemy.elite ? "elite" : ""}" data-act="target" data-arg="${enemy.uid}" data-who="${enemy.uid}" style="--slot:${index}">
       ${down ? "" : intentHtml(plan)}
-      <div class="unit-art">${jetArt(enemy.silhouette, { flip: true, livery: def.livery })}<div class="reticle"></div></div>
+      <div class="unit-art">${jetArt(enemy.silhouette, { livery: def.livery })}<div class="reticle"></div></div>
       <div class="unit-hud">
         <div class="nameplate"><b>${esc(enemy.name)}</b><small>${esc(enemy.epithet)}</small></div>
         ${hpBar(enemy.uid, enemy.hp, enemy.maxHp, enemy.shield)}
@@ -582,7 +582,7 @@ function battle(app: AppState): string {
   const needsTarget = app.armed !== null && combat.hand[app.armed] && getCard(combat.hand[app.armed].id).target === "enemy" && living.length > 1;
   return `
     <section class="battle n${combat.enemies.length} ${frozen ? "frozen" : ""} ${needsTarget ? "aiming" : ""}" style="--cw:${layout.cw}px">
-      <div class="stage">
+      <div class="stage chase-player">
         <div class="contact-tag"><span>${esc(combat.encounterName)}</span><b>Turn ${combat.turn}</b></div>
         <div class="ally" data-who="-1">
           <div class="unit-art">${jetArt(jet.silhouette, { cls: "player" })}</div>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CARDS, getCard } from "../src/game/cards";
-import { performEndTurn, performPlayCard, startEncounter } from "../src/game/combat";
+import { enemiesTakeLead, splitTurnEvents } from "../src/game/chase";
+import { PLAYER, performEndTurn, performPlayCard, setCombatFxSink, startEncounter, type CombatFx } from "../src/game/combat";
 import { ENCOUNTERS, ENEMIES } from "../src/game/enemies";
 import { EVENTS } from "../src/game/events";
 import { JET_ORDER, JETS } from "../src/game/jets";
@@ -113,6 +114,33 @@ describe("combat", () => {
     run.combat!.player.status.burn = 0;
     performEndTurn(run);
     expect(run.hp).toBe(hp - 6);
+  });
+
+  it("splits an end turn so enemies attack from behind, then the player takes the lead back", () => {
+    for (const id of ["a1-pair", "a2-zwilling", "a1-eule", "a2-adler", "a3-nebel"]) {
+      const { run } = boot(11);
+      startEncounter(run, id);
+      for (let turn = 0; turn < 3 && run.combat!.outcome === "fight"; turn++) {
+        run.hp = run.maxHp = 400;
+        const events: CombatFx[] = [];
+        setCombatFxSink((event) => events.push(event));
+        try {
+          performEndTurn(run);
+        } finally {
+          setCombatFxSink(null);
+        }
+        const { enemy, player } = splitTurnEvents(events);
+        expect(enemy.length + player.length, id).toBe(events.length);
+        expect(enemiesTakeLead(enemy), id).toBe(true);
+        expect(player[0]?.t, id).toBe("turn");
+        expect(player.some((event) => event.t === "move"), id).toBe(false);
+        expect(player.some((event) => (event.t === "hit" || event.t === "evade") && event.from !== PLAYER), id).toBe(false);
+        const enemyShots = enemy.filter((event) => event.t === "hit" || event.t === "evade");
+        expect(enemyShots.every((event) => event.who === PLAYER), id).toBe(true);
+      }
+    }
+    expect(enemiesTakeLead([{ t: "turn", n: 2 }])).toBe(false);
+    expect(splitTurnEvents([{ t: "down", who: 3 }])).toEqual({ enemy: [{ t: "down", who: 3 }], player: [] });
   });
 
   it("plays every card without throwing", () => {

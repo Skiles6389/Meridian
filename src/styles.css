@@ -2293,6 +2293,78 @@ button.card {
   pointer-events: none;
 }
 
+/* Tail chase: every jet faces right and the attacking side flies behind (on the left). */
+.stage.chase-enemy .ally {
+  left: auto;
+  right: 3%;
+}
+
+.stage.chase-enemy .foes {
+  left: 3%;
+  right: 42%;
+}
+
+.stage.chase-enemy .ally::before {
+  content: "Bandits on your six";
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  padding: 3px 12px 4px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #d9473a, #9c2219);
+  box-shadow: 0 0 0 2px #1a0806, 0 4px 14px rgba(0, 0, 0, 0.5);
+  color: #fff3ea;
+  font-family: var(--cond);
+  font-weight: 800;
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  z-index: 2;
+  animation: six-warn 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes six-warn {
+  to {
+    filter: brightness(1.25);
+  }
+}
+
+.surging .burner {
+  filter: blur(1px) brightness(1.7) saturate(1.3);
+}
+
+.braking .burner {
+  filter: blur(2px) brightness(0.45);
+}
+
+.stage.swapping::after {
+  content: "";
+  position: absolute;
+  inset: 8% -20%;
+  pointer-events: none;
+  background: repeating-linear-gradient(180deg, transparent 0 23px, rgba(235, 245, 255, 0.16) 23px 25px, transparent 25px 61px);
+  mask-image: linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent);
+  mix-blend-mode: screen;
+  animation: swap-streaks 0.78s linear forwards;
+}
+
+@keyframes swap-streaks {
+  0% {
+    translate: 12% 0;
+    opacity: 0;
+  }
+  25%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    translate: -12% 0;
+    opacity: 0;
+  }
+}
+
 .foe.crashing .unit-art {
   animation: crash 1.15s cubic-bezier(0.5, 0, 0.9, 0.6) forwards;
 }
@@ -2312,7 +2384,7 @@ button.card {
     filter: brightness(2.5);
   }
   100% {
-    transform: translate(60px, 180px) rotate(-28deg);
+    transform: translate(70px, 180px) rotate(26deg);
     filter: brightness(0.2) blur(2px);
     opacity: 0;
   }
@@ -4366,6 +4438,21 @@ div.loot > span {
     gap: 0;
   }
 
+  .stage.chase-enemy .ally {
+    left: auto;
+    right: 1%;
+  }
+
+  .stage.chase-enemy .foes {
+    left: 1%;
+    right: 46%;
+  }
+
+  .stage.chase-enemy .ally::before {
+    font-size: 0.66rem;
+    padding: 2px 8px 3px;
+  }
+
   .foe,
   .n2 .foe,
   .n3 .foe {
@@ -4739,5 +4826,12 @@ div.loot > span {
   .battle {
     --cw: 110px;
     --tray-h: 150px;
+  }
+
+  .stage.chase-enemy .ally::before {
+    top: 34%;
+    left: auto;
+    right: 92%;
+    transform: translateY(-50%);
   }
 }

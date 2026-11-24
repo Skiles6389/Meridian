@@ -7,6 +7,7 @@ import "@fontsource/saira-stencil-one/latin-400.css";
 import "./styles.css";
 import { setMuted, sfx, unlockAudio } from "./audio";
 import { getCard } from "./game/cards";
+import { enemiesTakeLead, splitTurnEvents } from "./game/chase";
 import { setCombatFxSink, type ActionResult, type CombatFx } from "./game/combat";
 import { HELP } from "./game/help";
 import { loadMeta, loadRun, saveMeta, saveRun } from "./game/meta";
@@ -39,6 +40,7 @@ import { shotStyle } from "./ui/art";
 import {
   aim,
   banner,
+  chase,
   flipHand,
   handRects,
   initFx,
@@ -249,8 +251,16 @@ async function combatAction(perform: () => ActionResult | void, opts: { shot: Sh
       }
     }
     if (opts.thrown) await wait(opts.attack ? 200 : 120);
-    if (opts.turn && events.some((event) => event.t === "move")) await banner("Enemy turn", "", "short enemy");
-    await playEvents(events, { playerShot: opts.shot, bars: barsOf(pre), pendingDown });
+    const ctx = { playerShot: opts.shot, bars: barsOf(pre), pendingDown };
+    if (opts.turn) {
+      const timeline = splitTurnEvents(events);
+      if (enemiesTakeLead(timeline.enemy)) await Promise.all([banner("Enemy turn", "", "short enemy"), chase("enemy")]);
+      await playEvents(timeline.enemy, ctx);
+      if (timeline.player.length) await chase("player");
+      await playEvents(timeline.player, ctx);
+    } else {
+      await playEvents(events, ctx);
+    }
     if (ended) {
       const won = run.screen !== "defeat";
       await wait(250);

@@ -1,4 +1,5 @@
 import { sfx } from "../audio";
+import type { ChaseLead } from "../game/chase";
 import { PLAYER, type CombatFx } from "../game/combat";
 
 let layer: HTMLElement;
@@ -70,8 +71,21 @@ function muzzle(who: number): { x: number; y: number } | null {
   const el = artEl(who)?.querySelector<HTMLElement>(".jet") ?? artEl(who);
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  const front = who === PLAYER ? r.left + r.width * 0.82 : r.left + r.width * 0.18;
-  return { x: front, y: r.top + r.height * 0.55 };
+  return { x: r.left + r.width * 0.82, y: r.top + r.height * 0.55 };
+}
+
+/** Which way `who` sits from `other` on screen: 1 when to its right, -1 when to its left. */
+function sideOf(who: number, other: number): number {
+  const a = center(who);
+  const b = center(other);
+  if (!a || !b) return who === PLAYER ? -1 : 1;
+  return a.x >= b.x ? 1 : -1;
+}
+
+function opponentOf(who: number): number {
+  if (who !== PLAYER) return PLAYER;
+  const foe = root.querySelector<HTMLElement>(".foe:not(.down)");
+  return foe ? Number(foe.dataset.who) : PLAYER;
 }
 
 /* --------------------------------------------------------------- pieces */
@@ -202,10 +216,10 @@ export async function shot(from: number, to: number, style: ShotStyle) {
   }
 }
 
-function recoil(who: number, hard: boolean) {
+function recoil(who: number, from: number, hard: boolean) {
   const art = artEl(who);
   if (!art) return;
-  const dir = who === PLAYER ? -1 : 1;
+  const dir = sideOf(who, from);
   art.animate(
     [
       { transform: "translate(0,0)", filter: "brightness(1)" },
@@ -236,11 +250,49 @@ function vignette(cls: string) {
 export function lunge(who: number) {
   const art = artEl(who);
   if (!art || reduced()) return;
-  const dir = who === PLAYER ? 1 : -1;
+  const dir = -sideOf(who, opponentOf(who));
   art.animate(
     [{ transform: "translateX(0)" }, { transform: `translateX(${dir * 46}px) translateY(-6px)` }, { transform: "translateX(0)" }],
     { duration: 420 * speed, easing: "cubic-bezier(.3,.7,.3,1)" },
   );
+}
+
+/**
+ * Swaps the two sides of the tail chase so `lead` (the side about to attack) flies behind.
+ * Every unit glides from its old place to its new one; jets pulling ahead climb over, the
+ * ones falling back dip under, so the paths cross without overlapping.
+ */
+export async function chase(lead: ChaseLead): Promise<void> {
+  const stage = root.querySelector<HTMLElement>(".stage");
+  if (!stage || stage.classList.contains(`chase-${lead}`)) return;
+  const units = [...stage.querySelectorAll<HTMLElement>(".ally, .foe:not(.down)")];
+  const before = new Map(units.map((el) => [el, el.getBoundingClientRect()]));
+  stage.classList.remove("chase-player", "chase-enemy");
+  stage.classList.add(`chase-${lead}`);
+  if (reduced()) return;
+  sfx("whoosh");
+  stage.classList.add("swapping");
+  const duration = 780 * speed;
+  const runs = units.map((el, index) => {
+    const a = before.get(el)!;
+    const b = el.getBoundingClientRect();
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    const ahead = dx < 0;
+    el.classList.add(ahead ? "surging" : "braking");
+    const lift = ahead ? -54 : 30 + index * 8;
+    return el.animate(
+      [
+        { translate: `${dx}px ${dy}px`, rotate: "0deg" },
+        { translate: `${dx * 0.5}px ${dy * 0.5 + lift}px`, rotate: ahead ? "-6deg" : "5deg", offset: 0.5 },
+        { translate: "0px 0px", rotate: "0deg" },
+      ],
+      { duration, delay: ahead ? 0 : index * 40 * speed, easing: "cubic-bezier(.5,.05,.3,1)", fill: "backwards" },
+    );
+  });
+  await Promise.all(runs.map((run) => run.finished.catch(() => undefined)));
+  stage.classList.remove("swapping");
+  for (const el of units) el.classList.remove("surging", "braking");
 }
 
 export function setBar(who: number, hp: number, shield: number) {
@@ -333,7 +385,7 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       const c = center(event.who);
       const heavy = event.amount >= 12 || style === "heavy";
       if (c) burst(c.x + (Math.random() * 30 - 15), c.y + (Math.random() * 20 - 10), heavy ? 70 : 40, heavy ? "boom" : "hit");
-      recoil(event.who, heavy);
+      recoil(event.who, event.from, heavy);
       ctx.bars.set(event.who, { hp: event.hp, shield: event.shield });
       setBar(event.who, event.hp, event.shield);
       if (event.amount > 0) {
