@@ -1,4 +1,5 @@
 import { getCard } from "./cards";
+import { scaleFighter } from "./difficulty";
 import { getEncounter, spawnFighter } from "./enemies";
 import type { EncounterDef } from "./enemies";
 import { RNG } from "./rng";
@@ -51,7 +52,11 @@ const FULL_SPECIALS = new Set([
   "burnThrough",
   "dataSpike",
   "cycleSteal",
+  "maverick",
+  "bathtubCharge",
 ]);
+
+export const PLATING_CAP = 30;
 
 export function livingEnemies(run: RunState): Fighter[] {
   return run.combat?.enemies.filter((enemy) => enemy.hp > 0) ?? [];
@@ -141,6 +146,22 @@ function gainShield(run: RunState, base: number): number {
   return amount;
 }
 
+function gainPlating(run: RunState, base: number): number {
+  const combat = run.combat;
+  if (!combat || base <= 0) return 0;
+  const status = combat.player.status;
+  const amount = Math.max(0, Math.min(base, PLATING_CAP - status.plating));
+  status.plating += amount;
+  if (amount > 0) fx(run, { t: "status", who: PLAYER, k: "plating", n: amount });
+  return amount;
+}
+
+function enemyDowned(run: RunState) {
+  if (!has(run, "gunCamera")) return;
+  const gained = heal(run, 3);
+  if (gained) log(run, `Gun Camera: heal ${gained}.`);
+}
+
 function draw(run: RunState, rng: RNG, count: number): number {
   const combat = run.combat;
   if (!combat || count <= 0) return 0;
@@ -211,6 +232,7 @@ function rawHitEnemy(run: RunState, enemy: Fighter, amount: number) {
   if (enemy.hp <= 0) {
     log(run, `${enemy.name} is down.`);
     fx(run, { t: "down", who: enemy.uid });
+    enemyDowned(run);
   }
 }
 
@@ -236,13 +258,13 @@ function attackFlat(run: RunState, firstAttack: boolean): number {
   return bonus;
 }
 
-function applyNumbersToEnemy(run: RunState, enemy: Fighter, hits: number[]) {
+function applyNumbersToEnemy(run: RunState, enemy: Fighter, hits: number[], pierce = false) {
   if (enemy.hp <= 0) return 0;
   const before = enemy.hp;
   for (const hit of hits) {
     if (enemy.hp <= 0) break;
     const raw = hit + enemy.status.locked * 3;
-    let damage = Math.max(0, raw - enemy.status.armor);
+    let damage = Math.max(0, raw - (pierce ? 0 : enemy.status.armor));
     const connected = damage > 0;
     const absorbed = Math.min(enemy.shield, damage);
     enemy.shield -= absorbed;
@@ -259,11 +281,12 @@ function applyNumbersToEnemy(run: RunState, enemy: Fighter, hits: number[]) {
   if (enemy.hp <= 0) {
     log(run, `${enemy.name} is down.`);
     fx(run, { t: "down", who: enemy.uid });
+    enemyDowned(run);
   }
   return dealt;
 }
 
-function playerAttack(run: RunState, targets: Fighter[], bases: number[], firstAttack: boolean): number {
+function playerAttack(run: RunState, targets: Fighter[], bases: number[], firstAttack: boolean, pierce = false): number {
   const combat = run.combat!;
   const ghost =
     firstAttack && combat.player.status.evasion > 0 && combat.powers.includes("ghostDoctrine");
@@ -271,7 +294,7 @@ function playerAttack(run: RunState, targets: Fighter[], bases: number[], firstA
   if (hits.length) hits[0] += attackFlat(run, firstAttack);
   hits = modifyOutgoing(combat.player.status, hits);
   let dealt = 0;
-  for (const target of targets) dealt += applyNumbersToEnemy(run, target, hits);
+  for (const target of targets) dealt += applyNumbersToEnemy(run, target, hits, pierce);
   return dealt;
 }
 
@@ -343,6 +366,18 @@ function resolveSpecial(run: RunState, rng: RNG, def: CardDef, foe: Fighter | nu
     notes.push(`${dealt} damage`);
     return true;
   }
+  if (def.special === "maverick" && foe) {
+    const amount = combat.player.status.plating >= 10 ? 20 : 13;
+    const dealt = playerAttack(run, [foe], [amount], firstAttack);
+    notes.push(`${dealt} damage`);
+    return true;
+  }
+  if (def.special === "bathtubCharge" && foe) {
+    const amount = 4 + Math.floor(combat.player.status.plating / 2);
+    const dealt = playerAttack(run, [foe], [amount], firstAttack);
+    notes.push(`${dealt} damage`);
+    return true;
+  }
   if (def.special === "cycleSteal") {
     const drawn = draw(run, rng, 3);
     notes.push(`draw ${drawn}`);
@@ -358,7 +393,7 @@ function resolveSpecial(run: RunState, rng: RNG, def: CardDef, foe: Fighter | nu
   return false;
 }
 
-function resolveEffect(run: RunState, rng: RNG, effect: Effect, foe: Fighter | null, firstAttack: boolean, notes: string[]) {
+function resolveEffect(run: RunState, rng: RNG, effect: Effect, foe: Fighter | null, firstAttack: boolean, notes: string[], pierce = false) {
   if (over(run)) return;
   const combat = run.combat!;
   const amount = effect.n ?? 0;
@@ -366,7 +401,7 @@ function resolveEffect(run: RunState, rng: RNG, effect: Effect, foe: Fighter | n
     const times = effect.times ?? 1;
     const bases = Array.from({ length: times }, () => amount);
     const targets = effect.aoe ? livingEnemies(run) : foe ? [foe] : [];
-    const dealt = playerAttack(run, targets, bases, firstAttack);
+    const dealt = playerAttack(run, targets, bases, firstAttack, pierce);
     notes.push(`${dealt} damage`);
     return;
   }
@@ -410,6 +445,10 @@ function resolveEffect(run: RunState, rng: RNG, effect: Effect, foe: Fighter | n
     combat.player.status.armor += amount;
     fx(run, { t: "status", who: PLAYER, k: "armor", n: amount });
     notes.push(`+${amount} Armor`);
+    return;
+  }
+  if (effect.k === "plating") {
+    notes.push(`+${gainPlating(run, amount)} Plating`);
     return;
   }
   if (effect.k === "power") {
@@ -535,13 +574,20 @@ function strikePlayer(run: RunState, enemy: Fighter, hits: number[]) {
       fx(run, { t: "evade", who: PLAYER, from: enemy.uid });
       continue;
     }
-    const absorbed = Math.min(combat.player.shield, damage);
-    combat.player.shield -= absorbed;
-    damage -= absorbed;
+    const shielded = Math.min(combat.player.shield, damage);
+    combat.player.shield -= shielded;
+    damage -= shielded;
+    const plated = Math.min(combat.player.status.plating, damage);
+    combat.player.status.plating -= plated;
+    damage -= plated;
+    const absorbed = shielded + plated;
     const before = run.hp;
     if (damage > 0) hurt(run, damage);
     suffered += before - run.hp;
     fx(run, { t: "hit", who: PLAYER, from: enemy.uid, amount: before - run.hp, blocked: absorbed, hp: run.hp, shield: combat.player.shield });
+    if (run.hp < before && combat.outcome === "fight") {
+      for (let i = 0; i < powerCount(run, "manualReversion"); i++) gainPlating(run, 3);
+    }
   }
   return suffered;
 }
@@ -618,6 +664,7 @@ function enemyPhase(run: RunState) {
         enemy.hp = 0;
         log(run, `${enemy.name} burns down.`);
         fx(run, { t: "down", who: enemy.uid });
+        enemyDowned(run);
         continue;
       }
     }
@@ -675,6 +722,7 @@ export function beginPlayerTurn(run: RunState) {
   combat.maxEnergy = maxEnergy(run);
   combat.energy = combat.maxEnergy;
   if (has(run, "warpedIntake")) combat.energy += 1;
+  if (combat.turn === 1 && has(run, "dropTank")) combat.energy += 1;
   if (has(run, "thirdDetent") && combat.turn % 3 === 0) {
     combat.energy += 1;
     log(run, "Third Detent opens another Energy.");
@@ -700,6 +748,8 @@ export function beginPlayerTurn(run: RunState) {
     const shield = gainShield(run, 8);
     log(run, `Beacon Lamp raises ${shield} Shield.`);
   }
+  if (has(run, "titaniumTub")) gainPlating(run, 4);
+  for (let i = 0; i < powerCount(run, "survivability"); i++) gainPlating(run, 3);
   for (let i = 0; i < powerCount(run, "anvilProtocol"); i++) {
     const shield = gainShield(run, 5);
     log(run, `Anvil Protocol raises ${shield} Shield.`);
@@ -720,7 +770,9 @@ export function openCombat(
   let uid = run.uid;
   const enemies = encounter.foes.map((spawn) => {
     uid += 1;
-    return spawnFighter(spawn, uid);
+    const fighter = spawnFighter(spawn, uid);
+    scaleFighter(fighter, run.difficulty ?? 0);
+    return fighter;
   });
   run.uid = uid;
   for (const enemy of enemies) {
@@ -757,6 +809,11 @@ export function openCombat(
     outcome: "fight",
   };
   if (has(run, "hotNozzle")) run.combat.player.status.thrust += 1;
+  if (has(run, "afterburnerLeak")) {
+    run.combat.player.status.thrust += 2;
+    run.combat.player.status.burn += 3;
+  }
+  if (has(run, "titaniumTub")) run.combat.player.status.plating = 4;
   saveRng(run, rng);
   beginPlayerTurn(run);
 }
@@ -791,9 +848,12 @@ export function performPlayCard(run: RunState, handIndex: number, targetUid: num
   if (!handled) {
     for (const effect of def.effects) {
       if (effect.k === "power") combat.powers.push(def.id);
-      resolveEffect(run, rng, effect, foe, firstAttack, notes);
+      resolveEffect(run, rng, effect, foe, firstAttack, notes, !!def.pierce);
       if (over(run)) break;
     }
+  }
+  if (def.type === "attack" && combat.outcome === "fight") {
+    for (let i = 0; i < powerCount(run, "closeAirSupport"); i++) notes.push(`+${gainPlating(run, 2)} Plating`);
   }
   if (def.type === "maneuver" && combat.outcome === "fight") {
     if (firstManeuver && has(run, "chaffLoader")) notes.push(`chaff +${gainShield(run, 4)} Shield`);
@@ -824,6 +884,10 @@ export function performEndTurn(run: RunState) {
     combat.player.status.evasion += 2 * copies;
     const shield = gainShield(run, 5 * copies);
     log(run, `Patience: +${2 * copies} Evasion, +${shield} Shield.`);
+  }
+  if (powerCount(run, "loiter") && combat.energy > 0) {
+    const plated = gainPlating(run, 3 * combat.energy * powerCount(run, "loiter"));
+    log(run, `Loiter: +${plated} Plating.`);
   }
   if (has(run, "bingoCard") && combat.energy === 0) {
     const shield = gainShield(run, 5);

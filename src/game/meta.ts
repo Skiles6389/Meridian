@@ -1,3 +1,4 @@
+import { clampDifficulty, highestUnlocked, NORMAL } from "./difficulty";
 import { getEncounter, getEnemy } from "./enemies";
 import type { FoeSpawn } from "./enemies";
 import type { JetId, Meta, MetaStats, RunState } from "./types";
@@ -26,8 +27,10 @@ export function emptyStats(): MetaStats {
 export function freshMeta(): Meta {
   return {
     version: 1,
-    unlocked: { kite: true, bulwark: false, moth: false, lattice: false },
+    unlocked: { kite: true, bulwark: false, moth: false, lattice: false, hog: false },
     stats: emptyStats(),
+    cleared: {},
+    difficulty: NORMAL,
     mute: false,
     musicVol: 0.6,
     sfxVol: 0.8,
@@ -47,20 +50,34 @@ function volume(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
 }
 
+function cleanCleared(value: unknown): Meta["cleared"] {
+  if (!value || typeof value !== "object") return {};
+  const out: Meta["cleared"] = {};
+  for (const [jet, level] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof level === "number" && Number.isFinite(level)) out[jet as JetId] = clampDifficulty(level);
+  }
+  return out;
+}
+
 export function loadMeta(): Meta {
   const raw = storage()?.getItem(META_KEY);
   if (!raw) return freshMeta();
   try {
     const parsed = JSON.parse(raw) as Meta;
     if (parsed.version !== 1 || !parsed.unlocked || !parsed.stats) return freshMeta();
-    return {
+    const meta: Meta = {
       ...freshMeta(),
       ...parsed,
       unlocked: { ...freshMeta().unlocked, ...parsed.unlocked },
       stats: { ...emptyStats(), ...parsed.stats },
+      cleared: cleanCleared(parsed.cleared),
+      difficulty: clampDifficulty(parsed.difficulty ?? NORMAL),
       musicVol: volume(parsed.musicVol, 0.6),
       sfxVol: volume(parsed.sfxVol, 0.8),
     };
+    meta.difficulty = Math.min(meta.difficulty, highestUnlocked(meta));
+    checkUnlocks(meta);
+    return meta;
   } catch {
     return freshMeta();
   }
@@ -83,8 +100,11 @@ export function migrateRun(run: RunState): RunState {
   run.scratch = false;
   run.route = run.route ?? (run.nodeId ? [run.nodeId] : []);
   run.notices = run.notices ?? [];
+  run.difficulty = clampDifficulty(run.difficulty ?? NORMAL);
   const combat = run.combat;
   if (combat) {
+    combat.player.status.plating = combat.player.status.plating ?? 0;
+    for (const fighter of combat.enemies) fighter.status.plating = fighter.status.plating ?? 0;
     let foes: FoeSpawn[] = [];
     try {
       const encounter = getEncounter(combat.encounterId);
@@ -145,6 +165,10 @@ export function checkUnlocks(meta: Meta): JetId[] {
   if (!meta.unlocked.lattice && meta.stats.mysteries >= 5) {
     meta.unlocked.lattice = true;
     fresh.push("lattice");
+  }
+  if (!meta.unlocked.hog && meta.stats.deepest >= 3) {
+    meta.unlocked.hog = true;
+    fresh.push("hog");
   }
   return fresh;
 }

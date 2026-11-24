@@ -115,6 +115,86 @@ export const EVENTS: GameEvent[] = [
       { id: "rescue", label: "Try the rescue", detail: "Fight a heavy contact. If you win, heal 25% and stow 30 extra gold." },
     ],
   },
+  {
+    id: "tanker",
+    title: "Tanker on the Track",
+    body: "A tanker is flying a slow racetrack above the cloud deck with its boom already down. The boom operator sounds like nobody has talked to them since breakfast.",
+    choices: [
+      { id: "plug", label: "Plug in", detail: "Take on fuel and calm down. Heal 25% of your max HP." },
+      { id: "droptank", label: "Ask about the spare drop tank", detail: "Install Drop Tank. The hookup is clumsy: take 6 damage.", hpgt: 6 },
+      { id: "gossip", label: "Trade gossip for a long minute", detail: "They know what is waiting downrange. Choose 1 of 3 cards." },
+    ],
+  },
+  {
+    id: "gateguard",
+    title: "Gate Guard",
+    body: "An old Phantom sits on a plinth outside a base nobody locked when they left. Its gun camera is still in the nose, and the brass plaque is worth something to somebody.",
+    choices: [
+      { id: "camera", label: "Pull the gun camera", detail: "Install Gun Camera." },
+      { id: "plaque", label: "Pry off the plaque", detail: "Stow 55 gold. The fence wire takes 5 HP.", hpgt: 5 },
+      { id: "salute", label: "Salute and log it", detail: "Gain 4 max HP and heal 4." },
+    ],
+  },
+  {
+    id: "airshow",
+    title: "Airshow Fill-In",
+    body: "A county airshow lost its headline act to a flat tyre. The announcer is sweating through his shirt and offering the takings from the cake stall.",
+    choices: [
+      { id: "display", label: "Fly the display", detail: "Pull hard at low level. Take 10 damage. Stow 85 gold.", hpgt: 10 },
+      { id: "static", label: "Park in the static line", detail: "Sign hats for an hour. Stow 25 gold and heal 6." },
+      { id: "hangar", label: "Borrow their hangar instead", detail: "Spend the afternoon on the jet. Remove a card from your deck." },
+    ],
+  },
+  {
+    id: "thunderhead",
+    title: "Thunderhead",
+    body: "A storm cell stands across the corridor like a wall. There is a bright seam straight through the middle of it, and the seam is closing.",
+    choices: [
+      { id: "thread", label: "Thread the seam", detail: "Even odds: come out clean and remove a card for free, or take 14 damage.", hpgt: 14 },
+      { id: "climb", label: "Climb over the anvil", detail: "Take 6 damage from the cold. From the top you can see the whole corridor: choose 1 of 3 cards.", hpgt: 6 },
+      { id: "divert", label: "Divert to a farm strip", detail: "Pay 25 gold in landing fees and wait it out. Heal 12.", gold: 25 },
+    ],
+  },
+  {
+    id: "simbay",
+    title: "Sim Bay",
+    body: "A training wing left its simulator running. The instructor stayed too, mostly for the coffee, and is happy to put you through the syllabus.",
+    choices: [
+      { id: "drills", label: "Run the free drills", detail: "Replace 2 starter cards with random common cards." },
+      { id: "syllabus", label: "Book the full syllabus", detail: "Pay 60 gold. Replace 2 starter cards with random uncommon cards.", gold: 60 },
+      { id: "nap", label: "Sleep in the briefing room", detail: "Heal 10." },
+    ],
+  },
+  {
+    id: "fuelcash",
+    title: "Fuel for Cash",
+    body: "A fuel truck with no markings idles beside the strip. The driver wants your reserve fuel and has an envelope ready. His tailgate is covered in parts that came off other jets.",
+    choices: [
+      { id: "sell", label: "Sell your reserve", detail: "Fly lighter from now on. Lose 6 max HP. Stow 70 gold." },
+      { id: "buy", label: "Buy a part off the tailgate", detail: "Pay 60 gold. Install a random useful relic.", gold: 60 },
+      { id: "report", label: "Call it in", detail: "The base sends a mechanic out as thanks. Heal 8." },
+    ],
+  },
+  {
+    id: "numbers",
+    title: "Numbers Station",
+    body: "On a guard frequency that should be silent, a flat voice is reading out five-digit groups. Somebody, somewhere, is listening for them.",
+    choices: [
+      { id: "copy", label: "Copy the groups down", detail: "Add a random rare card. The distraction costs you: add an Airframe Crack to your deck." },
+      { id: "report", label: "File an intercept report", detail: "Intelligence pays for the recording. Stow 30 gold." },
+      { id: "off", label: "Switch it off", detail: "Some things are not your business. Heal 5." },
+    ],
+  },
+  {
+    id: "stray",
+    title: "Stray Wingman",
+    body: "A lone light fighter has drifted into your corridor on fumes, its pilot waving sheepishly. Their squadron is a long way north.",
+    choices: [
+      { id: "lead", label: "Lead them home", detail: "The detour takes 10 HP. Their squadron sends thanks: choose 1 of 3 rare cards.", hpgt: 10 },
+      { id: "swap", label: "Swap parts on a road strip", detail: "Their crew chief fits a hot-running burner can. Install Afterburner Leak (Curse) and heal 10." },
+      { id: "vector", label: "Give them a vector", detail: "They insist on paying for the help. Stow 20 gold." },
+    ],
+  },
 ];
 
 const BY_ID: Record<string, GameEvent> = Object.fromEntries(EVENTS.map((e) => [e.id, e]));

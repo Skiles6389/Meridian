@@ -41,6 +41,11 @@ export const STATUSES: GlossaryEntry[] = [
     text: "Incoming attack damage is reduced by Armor. It lasts the whole fight and does not stop Burn.",
   },
   {
+    id: "plating",
+    name: "Plating",
+    text: "Absorbs attack damage after Shield, but carries over between turns until spent. Caps at 30. Burn ignores it.",
+  },
+  {
     id: "suppress",
     name: "Suppress",
     text: "The next attack this craft makes deals no damage. Suppress then clears.",

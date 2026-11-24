@@ -476,6 +476,7 @@ const STATUS_WORD: Record<string, string> = {
   burn: "Burn",
   thrust: "Thrust",
   armor: "Armor",
+  plating: "Plating",
   suppress: "Suppress",
   static: "Static",
   energy: "Energy",

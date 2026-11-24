@@ -1,4 +1,4 @@
-export type JetId = "kite" | "bulwark" | "moth" | "lattice";
+export type JetId = "kite" | "bulwark" | "moth" | "lattice" | "hog";
 export type ActId = 1 | 2 | 3;
 export type CardType = "attack" | "maneuver" | "system" | "burden";
 export type Rarity = "starter" | "common" | "uncommon" | "rare" | "burden";
@@ -21,7 +21,8 @@ export type SilhouetteId =
   | "typhoon"
   | "typhoon_boss"
   | "f35"
-  | "f35_boss";
+  | "f35_boss"
+  | "a10";
 
 /** Paint variations applied over shared airframe art. */
 export type Livery = "" | "olive" | "green" | "night" | "steel" | "splinter" | "glass" | "storm" | "iron" | "frost";
@@ -44,6 +45,7 @@ export interface Effect {
     | "static"
     | "thrust"
     | "armor"
+    | "plating"
     | "power";
   n?: number;
   times?: number;
@@ -61,6 +63,8 @@ export interface CardDef {
   effects: Effect[];
   special?: string;
   exhaust?: boolean;
+  /** Damage from this card ignores the target's Armor. */
+  pierce?: boolean;
   target: "enemy" | "all" | "none";
 }
 
@@ -78,6 +82,8 @@ export interface Status {
   jam: number;
   suppress: number;
   static: number;
+  /** Player-only armor plate that, unlike Shield, carries over between turns. */
+  plating: number;
 }
 
 export interface Move {
@@ -226,6 +232,8 @@ export type RunScreen =
 export interface RunState {
   version: 1;
   seed: number;
+  /** -1 Rookie, 0 Normal, 1..10 Threat Level. Saves from before difficulty load as Normal. */
+  difficulty: number;
   rngState: number;
   uid: number;
   jet: JetId;
@@ -280,6 +288,10 @@ export interface Meta {
   version: 1;
   unlocked: Record<JetId, boolean>;
   stats: MetaStats;
+  /** Highest difficulty won per jet (-1 Rookie, 0 Normal, 1..10 Threat Level). */
+  cleared: Partial<Record<JetId, number>>;
+  /** Difficulty last picked in the hangar. */
+  difficulty: number;
   mute: boolean;
   /** Music volume, 0..1. */
   musicVol: number;
@@ -308,5 +320,6 @@ export function freshStatus(): Status {
     jam: 0,
     suppress: 0,
     static: 0,
+    plating: 0,
   };
 }

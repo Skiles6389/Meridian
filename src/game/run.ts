@@ -1,6 +1,8 @@
 import { CARD_PRICES, cardsOfRarity, getCard, rewardPool } from "./cards";
 import { performEndTurn, performPlayCard, startEncounter } from "./combat";
 import type { ActionResult } from "./combat";
+import { difficultyName, highestUnlocked, NORMAL, tuning } from "./difficulty";
+import type { Tuning } from "./difficulty";
 import { encounterPool } from "./enemies";
 import { getEvent } from "./events";
 import type { EventChoice } from "./events";
@@ -30,6 +32,19 @@ function healTo(run: RunState, amount: number): number {
   return run.hp - before;
 }
 
+export function tune(run: RunState): Tuning {
+  return tuning(run.difficulty ?? NORMAL);
+}
+
+/** Repair amount for a share of max HP, after the difficulty's healing scale. */
+export function repairOf(run: RunState, share: number): number {
+  return Math.max(1, Math.ceil(run.maxHp * share * tune(run).heal));
+}
+
+function purseOf(run: RunState, amount: number): number {
+  return Math.max(1, Math.round(amount * tune(run).gold));
+}
+
 export function gainGold(run: RunState, meta: Meta, amount: number) {
   if (amount <= 0) return;
   run.gold += amount;
@@ -38,7 +53,7 @@ export function gainGold(run: RunState, meta: Meta, amount: number) {
 }
 
 export function priced(run: RunState, base: number): number {
-  const multiplier = run.relics.includes("depotStamp") ? 0.8 : 1;
+  const multiplier = (run.relics.includes("depotStamp") ? 0.8 : 1) * tune(run).price;
   return Math.max(1, Math.floor(base * multiplier));
 }
 
@@ -79,6 +94,12 @@ function winRun(run: RunState, meta: Meta) {
   meta.stats.wins += 1;
   meta.stats.deepest = Math.max(meta.stats.deepest, 4);
   meta.stats.bestVictoryHp = Math.max(meta.stats.bestVictoryHp, run.hp);
+  const level = run.difficulty ?? NORMAL;
+  const openBefore = highestUnlocked(meta);
+  const best = meta.cleared[run.jet];
+  if (best === undefined || level > best) meta.cleared[run.jet] = level;
+  const openAfter = highestUnlocked(meta);
+  if (openAfter > openBefore) run.notices.push(`${difficultyName(openAfter)} unlocked in the hangar.`);
   noteUnlocks(run, meta);
 }
 
@@ -148,7 +169,7 @@ function winCombat(run: RunState, meta: Meta) {
   if (!combat) return;
   const rng = rngOf(run);
   const mode = combat.rewardMode;
-  let purse = mode === "boss" ? 64 + rng.int(12) : mode === "elite" ? 46 + rng.int(10) : 18 + run.act * 4 + rng.int(8);
+  let purse = purseOf(run, mode === "boss" ? 64 + rng.int(12) : mode === "elite" ? 46 + rng.int(10) : 18 + run.act * 4 + rng.int(8));
   gainGold(run, meta, purse);
   if (run.relics.includes("wingmanChit")) {
     gainGold(run, meta, 12);
@@ -186,19 +207,19 @@ function winCombat(run: RunState, meta: Meta) {
   if (mode === "boss") {
     cards = draftCards(run, rng, 3, "rare");
     relic = pickRelic(rng, unowned(run, shopRelics()));
-    heal = Math.ceil(run.maxHp * 0.15);
+    heal = repairOf(run, 0.15);
   } else if (mode === "elite") {
     cards = draftCards(run, rng, 3, "good");
     if (rng.chance(0.65)) relic = pickRelic(rng, unowned(run, shopRelics()));
-    else heal = Math.ceil(run.maxHp * 0.22);
+    else heal = repairOf(run, 0.22);
   } else {
     const roll = rng.next();
     if (roll < 0.6) cards = draftCards(run, rng, 3, bias);
-    else if (roll < 0.82) heal = Math.ceil(run.maxHp * 0.24);
+    else if (roll < 0.82) heal = repairOf(run, 0.24);
     else if (roll < 0.88) relic = pickRelic(rng, unowned(run, shopRelics()));
-    else gainGold(run, meta, 22);
+    else gainGold(run, meta, purseOf(run, 22));
   }
-  if (!relic && mode === "boss") gainGold(run, meta, 30);
+  if (!relic && mode === "boss") gainGold(run, meta, purseOf(run, 30));
 
   const next = mode === "boss" ? (run.act === 3 ? "victory" : "intermission") : "map";
   const noteBits = [combat.bonusNote, combat.encounterName].filter(Boolean);
@@ -229,18 +250,21 @@ function settle(run: RunState, meta: Meta) {
   if (run.combat?.outcome === "won") winCombat(run, meta);
 }
 
-export function createRun(jet: JetId, seed: number, meta: Meta): RunState {
+export function createRun(jet: JetId, seed: number, meta: Meta, difficulty = NORMAL): RunState {
   const rng = new RNG(seed >>> 0 || 1);
   const spec = JETS[jet];
   const map = generateMap(1, rng);
+  const t = tuning(difficulty);
+  const hp = Math.round(spec.hp * t.maxHp) + t.hpBonus;
   const run: RunState = {
     version: 1,
     seed: seed >>> 0 || 1,
+    difficulty,
     rngState: rng.state,
     uid: 0,
     jet,
-    hp: spec.hp,
-    maxHp: spec.hp,
+    hp,
+    maxHp: hp,
     gold: 90,
     deck: [],
     relics: [spec.relic],
@@ -263,6 +287,11 @@ export function createRun(jet: JetId, seed: number, meta: Meta): RunState {
     tally: { battles: 0, elites: 0, bosses: 0, mysteries: 0, cardsPlayed: 0, goldEarned: 0 },
   };
   for (const id of spec.deck) addCard(run, id);
+  for (let i = 0; i < t.curses; i++) {
+    const curse = pickRelic(rng, unowned(run, curseRelics()));
+    if (curse) run.notices.push(grantRelic(run, meta, curse));
+  }
+  saveRng(run, rng);
   meta.stats.runs += 1;
   meta.stats.deepest = Math.max(meta.stats.deepest, 1);
   return run;
@@ -319,7 +348,7 @@ function buildShop(run: RunState): ShopState {
     cards,
     relics,
     healPrice: priced(run, 48),
-    healAmount: Math.ceil(run.maxHp * 0.3),
+    healAmount: repairOf(run, 0.3),
     healSold: false,
   };
 }
@@ -455,7 +484,7 @@ export function ackReward(run: RunState, meta: Meta) {
 export function chooseIntermission(run: RunState, meta: Meta, choice: "heal" | "relic" | "card") {
   if (run.screen !== "intermission" || run.closed) return;
   if (choice === "heal") {
-    healTo(run, Math.ceil(run.maxHp * 0.4));
+    healTo(run, repairOf(run, 0.4));
     advanceAct(run, meta);
     return;
   }
@@ -697,12 +726,129 @@ export function chooseEvent(run: RunState, meta: Meta, choiceId: string): Action
     run.screen = "combat";
     settle(run, meta);
     return { ok: true };
+  } else if (view.id === "tanker" && choiceId === "plug") {
+    const gained = healTo(run, Math.ceil(run.maxHp * 0.25));
+    finishEvent(run, `The boom operator talks you through it. Heal ${gained}.`);
+  } else if (view.id === "tanker" && choiceId === "droptank") {
+    chip(run, meta, 6);
+    finishEvent(run, `${grantRelic(run, meta, "dropTank")} The hookup costs 6 HP.`);
+  } else if (view.id === "tanker" && choiceId === "gossip") {
+    openGift(run, rng, "good", "The boom operator has heard things. Choose one card.");
+    saveRng(run, rng);
+    return { ok: true };
+  } else if (view.id === "gateguard" && choiceId === "camera") {
+    finishEvent(run, grantRelic(run, meta, "gunCamera"));
+  } else if (view.id === "gateguard" && choiceId === "plaque") {
+    chip(run, meta, 5);
+    gainGold(run, meta, 55);
+    finishEvent(run, "The plaque comes away with a shriek of old bolts. -5 HP, +55 gold.");
+  } else if (view.id === "gateguard" && choiceId === "salute") {
+    run.maxHp += 4;
+    const gained = healTo(run, 4);
+    finishEvent(run, `You log the tail number and stand there a while. +4 max HP, heal ${gained}.`);
+  } else if (view.id === "airshow" && choiceId === "display") {
+    chip(run, meta, 10);
+    gainGold(run, meta, 85);
+    finishEvent(run, "The crowd loses its mind. Your neck does too. -10 HP, +85 gold.");
+  } else if (view.id === "airshow" && choiceId === "static") {
+    gainGold(run, meta, 25);
+    const gained = healTo(run, 6);
+    finishEvent(run, `A long afternoon of sun hats and questions. +25 gold, heal ${gained}.`);
+  } else if (view.id === "airshow" && choiceId === "hangar") {
+    saveRng(run, rng);
+    run.event = null;
+    run.remove = { price: 0, next: "map", goldOnRemove: 0 };
+    run.screen = "remove";
+    return { ok: true, message: "Pull a card." };
+  } else if (view.id === "thunderhead" && choiceId === "thread") {
+    if (rng.chance(0.5)) {
+      saveRng(run, rng);
+      run.event = null;
+      run.remove = { price: 0, next: "map", goldOnRemove: 0 };
+      run.screen = "remove";
+      return { ok: true, message: "You pop out into sunlight. Pull a card." };
+    }
+    chip(run, meta, 14);
+    finishEvent(run, "The seam closes on you halfway through. -14 HP.");
+  } else if (view.id === "thunderhead" && choiceId === "climb") {
+    chip(run, meta, 6);
+    if (!run.closed) {
+      openGift(run, rng, "normal", "From the top of the anvil you can see the whole corridor. Choose one card.");
+      saveRng(run, rng);
+      return { ok: true };
+    }
+  } else if (view.id === "thunderhead" && choiceId === "divert") {
+    run.gold -= 25;
+    const gained = healTo(run, 12);
+    finishEvent(run, `The farmer takes 25 gold and makes tea. Heal ${gained}.`);
+  } else if (view.id === "simbay" && choiceId === "drills") {
+    const names = retrainStarters(run, rng, 2, "common");
+    finishEvent(run, names.length ? `Drills done. Added ${names.join(" and ")}, in place of starter cards.` : "No starter cards left to retrain.");
+  } else if (view.id === "simbay" && choiceId === "syllabus") {
+    run.gold -= 60;
+    const names = retrainStarters(run, rng, 2, "uncommon");
+    finishEvent(run, names.length ? `The full syllabus. Added ${names.join(" and ")}, in place of starter cards.` : "No starter cards left to retrain.");
+  } else if (view.id === "simbay" && choiceId === "nap") {
+    const gained = healTo(run, 10);
+    finishEvent(run, `The briefing-room couch is the best bed on the corridor. Heal ${gained}.`);
+  } else if (view.id === "fuelcash" && choiceId === "sell") {
+    run.maxHp = Math.max(1, run.maxHp - 6);
+    run.hp = Math.min(run.hp, run.maxHp);
+    gainGold(run, meta, 70);
+    finishEvent(run, "The envelope is thick. The jet feels thinner. -6 max HP, +70 gold.");
+  } else if (view.id === "fuelcash" && choiceId === "buy") {
+    run.gold -= 60;
+    const pool = unowned(run, shopRelics());
+    const line = pool.length ? grantRelic(run, meta, rng.pick(pool).id) : "Everything on the tailgate is junk. He refunds you half.";
+    if (!pool.length) gainGold(run, meta, 30);
+    finishEvent(run, line);
+  } else if (view.id === "fuelcash" && choiceId === "report") {
+    const gained = healTo(run, 8);
+    finishEvent(run, `The truck is gone before the police arrive, but the mechanic stays. Heal ${gained}.`);
+  } else if (view.id === "numbers" && choiceId === "copy") {
+    const name = grantRandom(run, rng, "rare");
+    addCard(run, "airframeCrack");
+    finishEvent(run, `The groups decode into ${name}. You flew sloppy while you copied: Airframe Crack added.`);
+  } else if (view.id === "numbers" && choiceId === "report") {
+    gainGold(run, meta, 30);
+    finishEvent(run, "Somebody in a windowless room is pleased. +30 gold.");
+  } else if (view.id === "numbers" && choiceId === "off") {
+    const gained = healTo(run, 5);
+    finishEvent(run, `Quiet again. Heal ${gained}.`);
+  } else if (view.id === "stray" && choiceId === "lead") {
+    chip(run, meta, 10);
+    if (!run.closed) {
+      openGift(run, rng, "rare", "A crate arrives from up north with a thank-you note. Choose one card.");
+      saveRng(run, rng);
+      return { ok: true };
+    }
+  } else if (view.id === "stray" && choiceId === "swap") {
+    const line = grantRelic(run, meta, "afterburnerLeak");
+    const gained = healTo(run, 10);
+    finishEvent(run, `${line} Heal ${gained}.`);
+  } else if (view.id === "stray" && choiceId === "vector") {
+    gainGold(run, meta, 20);
+    finishEvent(run, "They rock their wings and head north. +20 gold.");
   } else {
     finishEvent(run, "You move on.");
   }
 
   saveRng(run, rng);
   return { ok: true };
+}
+
+/** Swaps up to `count` starter cards (Gun Burst and Flare Pop first) for random cards of a rarity. */
+function retrainStarters(run: RunState, rng: RNG, count: number, rarity: "common" | "uncommon"): string[] {
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const starters = run.deck.filter((card) => getCard(card.id).rarity === "starter");
+    if (!starters.length) break;
+    const basic = starters.filter((card) => card.id === "gunBurst" || card.id === "flarePop");
+    const out = rng.pick(basic.length ? basic : starters);
+    run.deck = run.deck.filter((card) => card.uid !== out.uid);
+    names.push(grantRandom(run, rng, rarity));
+  }
+  return names;
 }
 
 export function continueEvent(run: RunState) {

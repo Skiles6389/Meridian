@@ -115,6 +115,17 @@ export const ENEMIES: EnemyDef[] = [
     moves: [mv("Wall", { shield: 14 }), atk("Ram", 22), atk("Tar Shot", 13, 1, { burn: 1 })],
   },
   {
+    id: "kranich",
+    name: "Alpha Jet E",
+    epithet: "Kranich pair · aerobatic aggressors",
+    hp: 54,
+    silhouette: "alphajet",
+    livery: "splinter",
+    accent: "#ffd35a",
+    elite: true,
+    moves: [atk("Scissors", 5, 2), mv("Break Turn", { shield: 7 }), atk("Gun Pass", 12)],
+  },
+  {
     id: "falke",
     name: "Eurofighter Typhoon",
     epithet: "Sturmfalke pair · quick-reaction alert",
@@ -174,6 +185,17 @@ export const ENEMIES: EnemyDef[] = [
     moves: [atk("Press", 14, 2), mv("Weld", { shield: 14, armor: 1 }), atk("Shear", 24)],
   },
   {
+    id: "uhu",
+    name: "Tornado ECR",
+    epithet: "Uhu · night electronic attack",
+    hp: 140,
+    silhouette: "tornado_ecr",
+    livery: "night",
+    accent: "#c79cff",
+    elite: true,
+    moves: [atk("Blind", 14, 1, { jam: 2 }), atk("Needle", 8, 3), mv("Dazzle", { shield: 13, stat: 1 })],
+  },
+  {
     id: "spiegel",
     name: "Eurofighter Typhoon EK",
     epithet: "Spiegel test cell · electronic combat",
@@ -227,6 +249,17 @@ export const ENEMIES: EnemyDef[] = [
     elite: true,
     riposte: 5,
     moves: [atk("Shroud", 12, 1, { suppress: 1 }), atk("Knife", 32), mv("Veil", { shield: 12, burn: 1 })],
+  },
+  {
+    id: "falkenauge",
+    name: "Eurofighter Typhoon",
+    epithet: "Falkenauge · weapons school lead",
+    hp: 200,
+    silhouette: "typhoon",
+    livery: "steel",
+    accent: "#ffb020",
+    elite: true,
+    moves: [mv("Zoom Climb", { thrust: 2, shield: 12 }), atk("Dive", 15, 2), atk("Gun Kill", 30)],
   },
   {
     id: "eule",
@@ -337,6 +370,16 @@ export const ENCOUNTERS: EncounterDef[] = [
   },
   { id: "a1-rabe", name: "Black-tail Starfighter", act: 1, kind: "elite", foes: [{ id: "rabe" }] },
   { id: "a1-moor", name: "Marine Tornado", act: 1, kind: "elite", foes: [{ id: "moorhau" }] },
+  {
+    id: "a1-kranich",
+    name: "Display pair",
+    act: 1,
+    kind: "elite",
+    foes: [
+      { id: "kranich", name: "Kranich Lead" },
+      { id: "kranich", name: "Kranich Two" },
+    ],
+  },
   { id: "a1-eule", name: "Graue Eule", act: 1, kind: "boss", foes: [{ id: "eule" }] },
 
   { id: "a2-falke", name: "Typhoon alert", act: 2, kind: "battle", foes: [{ id: "falke" }] },
@@ -364,6 +407,7 @@ export const ENCOUNTERS: EncounterDef[] = [
     ],
   },
   { id: "a2-hoch", name: "Phantom battery", act: 2, kind: "elite", foes: [{ id: "hochbahn" }] },
+  { id: "a2-uhu", name: "Night jammer", act: 2, kind: "elite", foes: [{ id: "uhu" }] },
   { id: "a2-adler", name: "Königsadler", act: 2, kind: "boss", foes: [{ id: "adler" }] },
 
   { id: "a3-spiegel", name: "Typhoon EK", act: 3, kind: "battle", foes: [{ id: "spiegel" }] },
@@ -381,6 +425,7 @@ export const ENCOUNTERS: EncounterDef[] = [
   },
   { id: "a3-schwarz", name: "Night Fulcrum", act: 3, kind: "elite", foes: [{ id: "schwarz" }] },
   { id: "a3-weiss", name: "Lightning escort", act: 3, kind: "elite", foes: [{ id: "weiss" }] },
+  { id: "a3-falkenauge", name: "Weapons school", act: 3, kind: "elite", foes: [{ id: "falkenauge" }] },
   { id: "a3-nebel", name: "Nebelhorn", act: 3, kind: "boss", foes: [{ id: "nebel" }] },
 ];
 

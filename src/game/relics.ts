@@ -46,6 +46,14 @@ export const RELICS: RelicDef[] = [
     text: "At the start of your turn, apply 2 Jam to the lead enemy.",
   },
   {
+    id: "titaniumTub",
+    name: "Titanium Tub",
+    kind: "starter",
+    jet: "hog",
+    price: 0,
+    text: "Start each fight with 8 Plating. At the start of your turn, gain 4 Plating.",
+  },
+  {
     id: "auxTank",
     name: "Aux Tank",
     kind: "buff",
@@ -172,6 +180,20 @@ export const RELICS: RelicDef[] = [
     text: "Whenever you defeat a boss, gain 4 max HP and heal 4.",
   },
   {
+    id: "dropTank",
+    name: "Drop Tank",
+    kind: "buff",
+    price: 122,
+    text: "On turn 1 of each fight, gain 1 extra Energy.",
+  },
+  {
+    id: "gunCamera",
+    name: "Gun Camera",
+    kind: "buff",
+    price: 118,
+    text: "Whenever an enemy goes down, heal 3 HP.",
+  },
+  {
     id: "warpedIntake",
     name: "Warped Intake",
     kind: "curse",
@@ -212,6 +234,13 @@ export const RELICS: RelicDef[] = [
     kind: "curse",
     price: 0,
     text: "Curse. Draw 1 extra card each turn. Enemies start each fight with 3 Armor.",
+  },
+  {
+    id: "afterburnerLeak",
+    name: "Afterburner Leak",
+    kind: "curse",
+    price: 0,
+    text: "Curse. Start each fight with 2 Thrust and 3 Burn.",
   },
 ];
 

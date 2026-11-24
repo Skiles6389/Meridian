@@ -3,12 +3,13 @@ import { getCard } from "../game/cards";
 import { cardCost, enemyPlan, forecastLoss } from "../game/combat";
 import { getEncounter, getEnemy } from "../game/enemies";
 import { getEvent } from "../game/events";
+import { bestClear, difficultyName, highestUnlocked, MAX_THREAT, NORMAL, ROOKIE, ROOKIE_TEXT, THREAT_STEPS } from "../game/difficulty";
 import { STATUS_BY_ID } from "../game/glossary";
 import { HELP } from "../game/help";
 import { JETS, JET_ORDER, unlockBlurb } from "../game/jets";
 import { nodeById } from "../game/map";
 import { getRelic } from "../game/relics";
-import { choiceAvailable, reachable, removalCost } from "../game/run";
+import { choiceAvailable, reachable, removalCost, repairOf } from "../game/run";
 import type { CardDef, Fighter, MapNode, NodeType, Plan, RunState, Status } from "../game/types";
 import { ACT_SCENE, SCENE_ART, cardArt, eventArt, jetArt } from "./art";
 import { icon, nodeIcon, relicIcon } from "./icons";
@@ -56,7 +57,7 @@ export function sceneKey(app: AppState): string {
 
 /* ---------------------------------------------------------------- shared */
 
-const KEYWORDS = ["Shield", "Evasion", "Locked", "Lock", "Jam", "Burn", "Thrust", "Armor", "Suppress", "Static", "Exhaust", "Energy", "ALL", "Clog"];
+const KEYWORDS = ["Shield", "Plating", "Evasion", "Locked", "Lock", "Jam", "Burn", "Thrust", "Armor", "Suppress", "Static", "Exhaust", "Energy", "ALL", "Clog"];
 const KW_RE = new RegExp(`\\b(${KEYWORDS.join("|")})\\b|(\\d+)`, "g");
 
 function richText(text: string): string {
@@ -98,6 +99,7 @@ function statusRow(status: Status): string {
     statusChip("jam", status.jam),
     statusChip("burn", status.burn),
     statusChip("thrust", status.thrust),
+    statusChip("plating", status.plating ?? 0),
     statusChip("armor", status.armor),
     statusChip("suppress", status.suppress),
     statusChip("static", status.static),
@@ -198,6 +200,51 @@ function summarize(ids: string[]): { name: string; count: number; type: string }
   return [...counts.entries()].map(([id, count]) => ({ name: getCard(id).name, count, type: getCard(id).type }));
 }
 
+function shortClear(level: number): string {
+  return level <= ROOKIE ? "R" : level === NORMAL ? "N" : `T${level}`;
+}
+
+function clearLabel(level: number | null): string {
+  if (level === null) return "No clear yet";
+  return difficultyName(level);
+}
+
+function difficultyPicker(app: AppState): string {
+  const level = app.meta.difficulty;
+  const open = highestUnlocked(app.meta);
+  const threat = level > NORMAL ? level : Math.max(1, open);
+  const threatOpen = open >= 1;
+  const mode = (label: string, arg: number, on: boolean, disabled = false, title = "") =>
+    `<button class="diff-mode ${on ? "on" : ""}" data-act="difficulty" data-arg="${arg}" ${disabled ? "disabled" : ""} ${title ? `title="${esc(title)}"` : ""}>${label}</button>`;
+  const notes =
+    level === ROOKIE
+      ? ROOKIE_TEXT
+      : level === NORMAL
+        ? ["The standard corridor, as tuned."]
+        : THREAT_STEPS.slice(0, level).map((step, i) => `${i + 1}. ${step.name}: ${step.text}`);
+  const best = bestClear(app.meta, app.jetPick);
+  return `
+    <div class="diff-picker" data-level="${level}">
+      <div class="diff-head"><span>Difficulty</span><small>Best clear: <b>${esc(clearLabel(best))}</b></small></div>
+      <div class="diff-modes">
+        ${mode("Rookie", ROOKIE, level === ROOKIE)}
+        ${mode("Normal", NORMAL, level === NORMAL)}
+        ${mode(threatOpen ? `Threat ${threat}` : `${icon("suppress")} Threat`, threat, level > NORMAL, !threatOpen, threatOpen ? "" : "Win a sortie on Normal to open Threat Level 1.")}
+      </div>
+      ${
+        level > NORMAL
+          ? `<div class="diff-step">
+              <button class="diff-arrow" data-act="difficulty" data-arg="${level - 1}" ${level <= 1 ? "disabled" : ""} aria-label="Lower Threat Level">‹</button>
+              <div class="diff-pips">${Array.from({ length: MAX_THREAT }, (_, i) => `<i class="${i < level ? "on" : ""} ${i >= open ? "shut" : ""}"></i>`).join("")}</div>
+              <button class="diff-arrow" data-act="difficulty" data-arg="${level + 1}" ${level >= open ? "disabled" : ""} aria-label="Raise Threat Level">›</button>
+            </div>`
+          : ""
+      }
+      <ul class="diff-notes">${notes.map((line) => `<li>${esc(line)}</li>`).join("")}</ul>
+      ${level > NORMAL || !threatOpen ? `<p class="diff-hint">${threatOpen ? `Win at Threat ${open} to open the next level.` : "Win a sortie on Normal to open Threat Level 1."}</p>` : ""}
+    </div>`;
+}
+
 function hangar(app: AppState): string {
   const picked = JETS[app.jetPick];
   const relic = getRelic(picked.relic);
@@ -207,11 +254,12 @@ function hangar(app: AppState): string {
     const open = app.meta.unlocked[id];
     const selected = app.jetPick === id;
     return `
-      <button class="roster-tile ${selected ? "on" : ""} ${open ? "" : "locked"}" data-act="pick-jet" data-arg="${id}" title="${esc(open ? `${jet.code} ${jet.name}` : unlockBlurb(id, app.meta.stats.mysteries))}">
+      <button class="roster-tile ${selected ? "on" : ""} ${open ? "" : "locked"}" data-act="pick-jet" data-arg="${id}" title="${esc(open ? `${jet.code} ${jet.name}` : unlockBlurb(id, app.meta.stats))}">
         <span class="roster-art">${jetArt(jet.silhouette)}</span>
         <span class="roster-code">${esc(jet.code)}</span>
         <span class="roster-name">${esc(jet.name)}</span>
         ${open ? "" : `<span class="roster-lock">Locked</span>`}
+        ${open && bestClear(app.meta, id) !== null ? `<span class="roster-clear" title="Best clear: ${esc(clearLabel(bestClear(app.meta, id)))}">${esc(shortClear(bestClear(app.meta, id)!))}</span>` : ""}
       </button>`;
   }).join("");
   const hpPct = Math.round((picked.hp / 90) * 100);
@@ -237,7 +285,8 @@ function hangar(app: AppState): string {
           <div class="system-slot relic-starter"><div class="relic-medal">${relicIcon(relic.id)}</div><div><strong>${esc(relic.name)}</strong><p>${esc(relic.text)}</p></div></div>
           <p class="fine">${esc(picked.play)}</p>
           <div class="deck-chips">${summarize(picked.deck).map((row) => `<span class="deck-chip type-${row.type}">${row.count}× ${esc(row.name)}</span>`).join("")}</div>
-          ${unlocked ? "" : `<p class="lock-note">${icon("suppress")} ${esc(unlockBlurb(app.jetPick, app.meta.stats.mysteries))}</p>`}
+          ${unlocked ? "" : `<p class="lock-note">${icon("suppress")} ${esc(unlockBlurb(app.jetPick, app.meta.stats))}</p>`}
+          ${unlocked ? difficultyPicker(app) : ""}
           <div class="launch-row">
             <label class="seed">Seed <input data-act="seed" value="${esc(app.seedInput)}" inputmode="numeric" placeholder="random" /></label>
             ${btn("Launch", "launch", { cls: "primary big launch", disabled: !unlocked })}
@@ -280,7 +329,7 @@ function records(app: AppState): string {
           ${JET_ORDER.map((id) => {
             const jet = JETS[id];
             const on = app.meta.unlocked[id];
-            return `<li class="${on ? "on" : ""}"><span class="unlock-art">${jetArt(jet.silhouette)}</span><strong>${esc(jet.code)} ${esc(jet.name)}</strong><span>${on ? "Unlocked" : esc(unlockBlurb(id, stats.mysteries))}</span></li>`;
+            return `<li class="${on ? "on" : ""}"><span class="unlock-art">${jetArt(jet.silhouette)}</span><strong>${esc(jet.code)} ${esc(jet.name)}</strong><span>${on ? `Best clear: ${esc(clearLabel(bestClear(app.meta, id)))}` : esc(unlockBlurb(id, stats))}</span></li>`;
           }).join("")}
         </ul>
       </div>
@@ -447,7 +496,7 @@ function mapScreen(app: AppState): string {
             ${paths.join("")}
             ${taken.join("")}
           </svg>
-          <div class="chart-cartouche"><span>Act ${run.act}</span><b>${esc(ACTS[run.act].name)}</b><small>Seed ${run.seed}</small></div>
+          <div class="chart-cartouche"><span>Act ${run.act}</span><b>${esc(ACTS[run.act].name)}</b><small>Seed ${run.seed} · ${esc(difficultyName(run.difficulty ?? NORMAL))}</small></div>
           ${nodes}
           ${marker}
         </div>
@@ -863,14 +912,14 @@ function removal(app: AppState): string {
   `;
 }
 
-function intermission(): string {
+function intermission(app: AppState): string {
   return storyScreen({
     art: eventArt("intermission"),
     kicker: "Corridor clear",
     title: "The next airspace is already painting you",
     story: "You get one hardstand choice before the new chart. HP will not tick up on its own.",
     body: `<div class="choices">
-      <button class="choice" data-act="intermission" data-arg="heal"><b>Field repair</b><span>Heal 40% of max HP.</span></button>
+      <button class="choice" data-act="intermission" data-arg="heal"><b>Field repair</b><span>Heal ${repairOf(app.run!, 0.4)} HP (40% of max HP${app.run!.difficulty ? `, ${difficultyName(app.run!.difficulty)}` : ""}).</span></button>
       <button class="choice" data-act="intermission" data-arg="relic"><b>Depot crate</b><span>Install a random useful relic.</span></button>
       <button class="choice" data-act="intermission" data-arg="card"><b>Munitions</b><span>Choose 1 of 3 cards.</span></button>
     </div>`,
@@ -888,7 +937,7 @@ function ending(app: AppState): string {
         <h1>${won ? "You held the corridor." : esc(run.defeatReason || "Airframe lost.")}</h1>
         <div class="end-art ${won ? "" : "lost"}">${jetArt(jet.silhouette)}</div>
         <p class="end-line">${esc(jet.callsign)} · Act ${run.act} · ${icon("heart")} ${run.hp}/${run.maxHp} · ${icon("coin")} ${run.gold}</p>
-        <p class="fine">Fights ${run.tally.battles} · Elites ${run.tally.elites} · Bosses ${run.tally.bosses} · Seed ${run.seed}</p>
+        <p class="fine">${esc(difficultyName(run.difficulty ?? NORMAL))} · Fights ${run.tally.battles} · Elites ${run.tally.elites} · Bosses ${run.tally.bosses} · Seed ${run.seed}</p>
         <div class="end-relics">${run.relics.map((id) => `<span class="relic relic-${getRelic(id).kind}" title="${esc(getRelic(id).name)}">${relicIcon(id)}</span>`).join("")}</div>
         ${run.notices.map((note) => `<p class="notice static">${esc(note)}</p>`).join("")}
         <div class="btn-row center">
@@ -995,7 +1044,7 @@ function runScreen(app: AppState): string {
   else if (run.screen === "event" && run.event) body = eventScreen(app);
   else if (run.screen === "gamble" && run.gamble) body = gamble(app);
   else if (run.screen === "remove" && run.remove) body = removal(app);
-  else if (run.screen === "intermission") body = intermission();
+  else if (run.screen === "intermission") body = intermission(app);
   else if (run.screen === "victory" || run.screen === "defeat") body = ending(app);
   else body = mapScreen(app);
   return `${hud(app)}<div class="screen-body">${body}</div>`;

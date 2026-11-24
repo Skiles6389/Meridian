@@ -38,6 +38,7 @@ export const HELP: HelpPage[] = [
       "Jam reduces the next attack that craft makes by 3 per stack, shaved off the front hits, then clears.",
       "Burn deals its stacks as damage at the start of that craft's turn, through Shield and Armor, then fades by 1.",
       "Thrust adds damage to every hit for the rest of the fight. Armor reduces incoming attack damage for the rest of the fight. Suppress zeroes the next attack. Static makes you draw fewer cards.",
+      "Plating (A-10C) soaks attack damage after Shield, but stays between turns until it is spent. It caps at 30 and does not stop Burn.",
     ],
   },
   {
@@ -55,7 +56,16 @@ export const HELP: HelpPage[] = [
       "F-15E Strike Eagle unlocks when you defeat the Act 1 boss, the Phantom “Graue Eule”.",
       "F-22A Raptor unlocks when you win a full sortie.",
       "EA-18G Growler unlocks when you have resolved 5 mystery events across sorties.",
+      "A-10C Thunderbolt II unlocks when you reach Act 3, the Glass Meridian, with any jet.",
       "Unlocks and the current sortie are stored in this browser.",
+    ],
+  },
+  {
+    title: "Difficulty",
+    lines: [
+      "Pick a difficulty in the hangar before launch. Rookie softens enemies and pays out more repairs and gold. Normal is the standard tuning.",
+      "Win a sortie on Normal to open Threat Level 1. Each Threat Level adds one more modifier on top of the last, up to Threat 10. A win at any level opens the next one for every jet.",
+      "The hangar shows the best level each jet has cleared.",
     ],
   },
 ];

@@ -1,4 +1,4 @@
-import type { JetId, SilhouetteId } from "./types";
+import type { JetId, MetaStats, SilhouetteId } from "./types";
 
 export interface JetDef {
   id: JetId;
@@ -21,7 +21,7 @@ function copies(id: string, n: number): string[] {
 }
 
 /**
- * Internal ids (kite, bulwark, moth, lattice) predate the real-aircraft reskin.
+ * Internal ids (kite, bulwark, moth, lattice) predate the real-aircraft reskin; hog came later.
  * They are kept so saved unlocks and sorties load unchanged.
  */
 export const JETS: Record<JetId, JetDef> = {
@@ -47,7 +47,7 @@ export const JETS: Record<JetId, JetDef> = {
     role: "Strike fighter",
     maker: "McDonnell Douglas",
     callsign: "MUDHEN 2",
-    hp: 100,
+    hp: 106,
     blurb: "Two crew, two engines, conformal tanks, and more ordnance than the runway liked. It treats the merge like a loading dock.",
     play: "Big missiles, thick Shield, and Armor. Conformal Stations add damage to your first Attack each turn.",
     relic: "ordnanceBay",
@@ -85,13 +85,29 @@ export const JETS: Record<JetId, JetDef> = {
     silhouette: "ea18g",
     accent: "#8ebfff",
   },
+  hog: {
+    id: "hog",
+    code: "A-10C",
+    name: "Thunderbolt II",
+    role: "Close air support",
+    maker: "Fairchild Republic",
+    callsign: "HOG 5",
+    hp: 96,
+    blurb: "A seven-barrel cannon with an airplane built around it, a titanium tub around the pilot, and enough redundancy to come home on half a wing.",
+    play: "Plating, multi-hit guns, and patience. Plating soaks hits like Shield but carries over between turns; Titanium Tub starts every fight armored.",
+    relic: "titaniumTub",
+    deck: [...copies("gunBurst", 3), ...copies("brrt", 2), ...copies("flarePop", 3), ...copies("bathtub", 2)],
+    silhouette: "a10",
+    accent: "#a9d36b",
+  },
 };
 
-export const JET_ORDER: JetId[] = ["kite", "bulwark", "moth", "lattice"];
+export const JET_ORDER: JetId[] = ["kite", "bulwark", "moth", "lattice", "hog"];
 
-export function unlockBlurb(id: JetId, mysteries: number): string {
+export function unlockBlurb(id: JetId, stats: Pick<MetaStats, "mysteries" | "deepest">): string {
   if (id === "kite") return "On the line from the first briefing.";
   if (id === "bulwark") return "Defeat the Act 1 boss, the Phantom “Graue Eule”.";
   if (id === "moth") return "Win a full sortie — clear Act 3.";
-  return `Resolve 5 mystery events across sorties (${mysteries}/5).`;
+  if (id === "hog") return "Reach Act 3, the Glass Meridian, with any jet.";
+  return `Resolve 5 mystery events across sorties (${stats.mysteries}/5).`;
 }

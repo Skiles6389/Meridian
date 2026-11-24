@@ -53,6 +53,7 @@ import {
   wipe,
   type ShotStyle,
 } from "./ui/fx";
+import { highestUnlocked, ROOKIE } from "./game/difficulty";
 import type { AppState } from "./ui/model";
 import { isCompact, phoneShape, renderApp, sceneKey, screenName } from "./ui/render";
 import { initScene, setScene } from "./ui/scene";
@@ -172,7 +173,7 @@ function launch() {
     sfx("error");
     return;
   }
-  app.run = createRun(jet, seedValue(), app.meta);
+  app.run = createRun(jet, seedValue(), app.meta, app.meta.difficulty);
   app.view = "run";
   app.modal = null;
   app.selectedNode = null;
@@ -601,6 +602,11 @@ function onClick(event: MouseEvent) {
   } else if (act === "pick-jet") {
     app.jetPick = arg as JetId;
     sfx("click");
+  } else if (act === "difficulty") {
+    const level = Math.max(ROOKIE, Math.min(highestUnlocked(app.meta), Number(arg)));
+    if (Number.isFinite(level)) app.meta.difficulty = level;
+    sfx("click");
+    persist();
   } else if (act === "launch") {
     if (app.run && !app.run.closed) app.modal = "confirm-new";
     else launch();

@@ -56,7 +56,9 @@ export type CardTheme =
   | "crack"
   | "surge"
   | "dogfight"
-  | "systems";
+  | "systems"
+  | "cannon"
+  | "plating";
 
 const THEME_BY_CARD: Record<string, CardTheme> = {
   gunBurst: "gun",
@@ -131,6 +133,20 @@ const THEME_BY_CARD: Record<string, CardTheme> = {
   spoof: "jam",
   dataSpike: "surge",
   overloadArray: "jam",
+  brrt: "cannon",
+  bathtub: "plating",
+  strafeRun: "cannon",
+  lowPass: "gun",
+  rivetLine: "plating",
+  rocketPods: "cluster",
+  maverick: "missile",
+  bathtubCharge: "plating",
+  speedTape: "repair",
+  loiter: "hud",
+  manualReversion: "systems",
+  avenger: "cannon",
+  closeAirSupport: "cannon",
+  survivability: "plating",
   airframeCrack: "crack",
 };
 
@@ -145,7 +161,7 @@ export function cardArt(id: string): string {
 /** How an attack card's shot travels on the battle stage. */
 export function shotStyle(id: string): "tracer" | "missile" | "heavy" | "zap" {
   const theme = cardTheme(id);
-  if (theme === "gun" || theme === "dogfight") return "tracer";
+  if (theme === "gun" || theme === "dogfight" || theme === "cannon") return "tracer";
   if (theme === "heavy" || theme === "cluster") return "heavy";
   if (theme === "surge" || theme === "jam" || theme === "radar") return "zap";
   return "missile";
