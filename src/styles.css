@@ -3082,6 +3082,105 @@ body.busy .end-turn {
   outline-offset: 4px;
 }
 
+/* Phone hands: art, name and cost only; the full card shows in the tap preview. */
+.hand.mini .slot:not(.hover) .card {
+  height: var(--ch);
+}
+
+.hand.mini .slot:not(.hover) .card-art {
+  height: auto;
+  bottom: 4.5em;
+}
+
+.hand.mini .slot:not(.hover) .card-name {
+  top: auto;
+  bottom: 0.6em;
+  left: 0.45em;
+  right: 0.45em;
+  height: 3.7em;
+  padding: 0 0.3em;
+  clip-path: none;
+  border-radius: 0.35em;
+}
+
+.hand.mini .slot:not(.hover) .card-name span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  text-align: center;
+  font-size: clamp(9.5px, calc(var(--cw) * 0.145), 12px);
+  line-height: 1.02;
+}
+
+.hand.mini .slot:not(.hover) .card-type,
+.hand.mini .slot:not(.hover) .card-text {
+  display: none;
+}
+
+.hand.mini .slot:not(.hover) .card-cost {
+  width: 3.5em;
+  height: 3.5em;
+  top: -0.7em;
+  left: -0.7em;
+}
+
+.hand.mini .slot:not(.hover) .card-cost span {
+  font-size: 2.25em;
+}
+
+.hand.mini .slot.armed .card {
+  transform: translateY(-14px);
+}
+
+.card-preview {
+  position: absolute;
+  left: 8px;
+  bottom: calc(var(--tray-h) + 6px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  animation: preview-in 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.card-preview .card {
+  --cw: var(--pw);
+}
+
+.card-preview .card.playable .card-frame {
+  box-shadow: 0 0 0 0.14em #0b0f14, 0 0 0 0.24em #ffd36a, 0 0 1.4em rgba(255, 211, 106, 0.45), inset 0 0 0 0.16em rgba(255, 255, 255, 0.18), inset 0 0 0 0.42em color-mix(in srgb, var(--frame) 70%, #000), 0 0.6em 1.4em rgba(0, 0, 0, 0.7);
+}
+
+.card-preview .card.unplayable {
+  filter: brightness(0.8) saturate(0.7);
+}
+
+.preview-hint {
+  margin: 0;
+  max-width: calc(var(--pw) + 30px);
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(8, 12, 16, 0.85);
+  box-shadow: 0 0 0 1px rgba(255, 211, 106, 0.5);
+  font-family: var(--cond);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+  color: #ffe6a8;
+  pointer-events: none;
+}
+
+@keyframes preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.92);
+  }
+}
+
 .empty-hand {
   position: absolute;
   left: 50%;
@@ -3248,7 +3347,19 @@ body.busy .hand .card {
   position: absolute;
   left: 0;
   top: 0;
-  offset-rotate: auto;
+}
+
+.missile i::after {
+  content: "";
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  width: 16px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 100% 50%, #ffffff, #ffd36a 35%, rgba(255, 110, 40, 0.6) 60%, transparent 75%);
+  animation: burner 0.06s steps(2) infinite alternate;
 }
 
 .missile i {
@@ -3446,13 +3557,41 @@ body.busy .hand .card {
 }
 
 .dmg {
-  font-size: 3rem;
+  font-size: clamp(2.1rem, 5vw + 0.8rem, 3rem);
   color: #fff3c4;
+  animation-name: dmg-pop;
+}
+
+@keyframes dmg-pop {
+  0% {
+    transform: translate(-50%, -50%) scale(2.2) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    transform: translate(-50%, -50%) scale(0.9) rotate(var(--rot));
+    opacity: 1;
+  }
+  18% {
+    transform: translate(-50%, -55%) scale(1.08) rotate(var(--rot));
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--dx)), -175%) scale(0.92) rotate(var(--rot));
+    opacity: 0;
+  }
 }
 
 .dmg-big {
-  font-size: 4rem;
+  font-size: clamp(2.8rem, 6vw + 1rem, 4rem);
   color: #ffc15a;
+}
+
+.dmg-crit span {
+  color: #ffe27a;
+  -webkit-text-stroke-color: #4a0e02;
+  text-shadow: 0 0 18px rgba(255, 120, 40, 0.85);
 }
 
 .dmg-player {
@@ -3707,6 +3846,144 @@ body.busy .hand .card {
   --cw: inherit;
 }
 
+.card-spark {
+  position: absolute;
+  width: 90px;
+  height: 90px;
+  margin: -45px 0 0 -45px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--c), 0 0 22px 6px var(--c), inset 0 0 18px var(--c);
+  animation: card-spark 0.5s ease-out forwards;
+}
+
+@keyframes card-spark {
+  from {
+    transform: scale(0.2);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.mflash {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform: rotate(var(--ang)) scale(var(--k));
+}
+
+.mflash i {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.mflash i:first-child {
+  width: 46px;
+  height: 26px;
+  margin: -13px 0 0 -8px;
+  background: radial-gradient(ellipse at 20% 50%, #ffffff 0 18%, #fff0a8 30%, #ffb43c 55%, transparent 72%);
+  clip-path: polygon(0 38%, 38% 30%, 50% 0, 60% 32%, 100% 50%, 60% 68%, 50% 100%, 38% 70%, 0 62%);
+  animation: mflash 0.12s ease-out forwards;
+}
+
+.mflash i:last-child {
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 250, 220, 0.95), rgba(255, 180, 70, 0.5) 45%, transparent 70%);
+  animation: mflash 0.16s ease-out forwards;
+}
+
+@keyframes mflash {
+  from {
+    transform: scale(0.5);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+
+.puff {
+  position: absolute;
+  width: var(--s);
+  height: var(--s);
+  margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2);
+  border-radius: 50%;
+  background: radial-gradient(circle at 45% 40%, rgba(250, 250, 246, 0.95), rgba(170, 176, 184, 0.6) 52%, transparent 72%);
+  animation: puff var(--life) ease-out forwards;
+}
+
+.puff-heavy {
+  background: radial-gradient(circle at 45% 40%, rgba(255, 236, 200, 0.9), rgba(210, 200, 190, 0.5) 55%, transparent 72%);
+}
+
+.puff-launch {
+  background: radial-gradient(circle, rgba(255, 250, 235, 0.95), rgba(220, 220, 215, 0.5) 50%, transparent 72%);
+}
+
+.puff-dark {
+  background: radial-gradient(circle at 45% 40%, rgba(60, 56, 54, 0.85), rgba(30, 28, 27, 0.45) 55%, transparent 72%);
+}
+
+@keyframes puff {
+  0% {
+    transform: translate(0, 0) scale(0.5);
+    opacity: 0.95;
+  }
+  30% {
+    transform: translate(calc(var(--dx) * 0.3), calc(var(--dy) * 0.3)) scale(1.1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(2.1);
+    opacity: 0;
+  }
+}
+
+.flash-screen {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255, 246, 220, 0.42), rgba(255, 210, 150, 0.16) 60%, transparent);
+  animation: vignette 0.25s ease-out forwards;
+}
+
+.shard {
+  position: absolute;
+  margin: -2px 0 0 -4px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, #1c2127, #4a525b);
+  box-shadow: 0 0 4px 1px rgba(255, 140, 60, 0.8);
+}
+
+.shock {
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  margin: -120px 0 0 -120px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 240, 210, 0.85);
+  box-shadow: 0 0 24px rgba(255, 200, 120, 0.6);
+  animation: shock 0.6s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+@keyframes shock {
+  from {
+    transform: scale(0.1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.4);
+    opacity: 0;
+    border-width: 1px;
+  }
+}
+
 /* ------------------------------------------------------------- reward */
 
 .reward-screen,
@@ -3912,6 +4189,46 @@ div.loot > span {
 
 .ware .card:hover:not(:disabled) {
   transform: translateY(-8px) scale(1.05);
+}
+
+.card.pick-armed,
+.card.pick-armed:hover:not(:disabled) {
+  z-index: 6;
+  transform: translateY(-6px) scale(1.45);
+}
+
+.pick-row .card.pick-armed:first-child,
+.ware:first-child .card.pick-armed {
+  transform-origin: 0 50%;
+}
+
+.pick-row .card.pick-armed:last-child,
+.ware:last-child .card.pick-armed {
+  transform-origin: 100% 50%;
+}
+
+.card.pick-armed .card-frame {
+  outline: 2px solid #ffd36a;
+  outline-offset: 2px;
+}
+
+.card.pick-armed::after {
+  content: attr(data-hint);
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translate(-50%, 0.5em);
+  padding: 0.25em 0.8em;
+  border-radius: 1em;
+  background: rgba(8, 12, 16, 0.92);
+  box-shadow: 0 0 0 1px rgba(255, 211, 106, 0.6);
+  font-family: var(--cond);
+  font-weight: 700;
+  font-size: 0.75em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #ffe6a8;
 }
 
 .ware .card:disabled {
@@ -4213,6 +4530,117 @@ div.loot > span {
 .modal-card.confirm {
   width: min(440px, 100%);
   text-align: center;
+}
+
+.modal-card.settings-modal {
+  width: min(460px, 100%);
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.slider {
+  display: grid;
+  grid-template-columns: 74px 1fr 46px;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--cond);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slider b {
+  text-align: right;
+  color: var(--brass-hi);
+}
+
+.slider input {
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--brass-hi);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.slider input::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(240, 205, 125, 0.75), rgba(240, 205, 125, 0.2));
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(200, 154, 75, 0.45);
+}
+
+.slider input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #fff4d6, #e0b35a 55%, #8a6224);
+  box-shadow: 0 0 0 2px #0a0e13, 0 3px 8px rgba(0, 0, 0, 0.6);
+}
+
+.slider input::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(240, 205, 125, 0.45);
+}
+
+.slider input::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 2px solid #0a0e13;
+  border-radius: 50%;
+  background: #e0b35a;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(200, 154, 75, 0.4);
+  color: var(--text);
+  font-family: var(--cond);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.toggle .ico {
+  width: 22px;
+  height: 22px;
+}
+
+.toggle span {
+  flex: 1;
+  text-align: left;
+}
+
+.toggle i {
+  font-style: normal;
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.toggle.on i {
+  background: #9c2219;
+  color: #fff3ea;
 }
 
 .modal-card h2 {
@@ -4550,7 +4978,7 @@ div.loot > span {
 
   .tray-left {
     left: 8px;
-    bottom: calc(var(--cw) * 1.42 + 8px);
+    bottom: calc(var(--ch) + 14px);
     gap: 8px;
     align-items: center;
   }
@@ -4582,7 +5010,7 @@ div.loot > span {
 
   .tray-right {
     right: 8px;
-    bottom: calc(var(--cw) * 1.42 + 8px);
+    bottom: calc(var(--ch) + 14px);
     flex-direction: row-reverse;
     align-items: center;
     gap: 8px;
@@ -4774,11 +5202,15 @@ div.loot > span {
   }
 
   .pick-row .card {
-    --cw: 112px;
+    --cw: min(112px, calc((100vw - 76px) / 3));
   }
 
   .ware .card {
-    --cw: 110px;
+    --cw: min(110px, calc((100vw - 52px) / 3));
+  }
+
+  .shop-table {
+    flex-wrap: nowrap;
   }
 
   .shop-table {
@@ -4822,16 +5254,276 @@ div.loot > span {
   }
 }
 
-@media (max-height: 560px) and (min-width: 721px) {
-  .battle {
-    --cw: 110px;
-    --tray-h: 150px;
+@media (max-width: 720px), (max-height: 560px) {
+  .launch-row {
+    position: sticky;
+    bottom: 8px;
+    z-index: 5;
+    margin: 4px -6px -6px;
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(10, 15, 21, 0.94);
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(200, 154, 75, 0.4);
+  }
+}
+
+@media (max-width: 720px) and (orientation: portrait) {
+  .hangar-main {
+    display: contents;
   }
 
-  .stage.chase-enemy .ally::before {
-    top: 34%;
-    left: auto;
-    right: 92%;
+  .hangar-stage {
+    order: 1;
+    padding: 0 12px;
+  }
+
+  .hangar-jet {
+    width: min(84%, 420px);
+  }
+
+  .hangar-plate {
+    margin-top: 6px;
+  }
+
+  .hangar-roster {
+    order: 2;
+    padding: 10px 12px 12px;
+  }
+
+  .hangar-info {
+    order: 3;
+    margin: 0 12px;
+  }
+}
+
+/* Landscape phones: one row of jets over a low tray, with the hand between the two button clusters. */
+@media (max-height: 560px) and (orientation: landscape) {
+  .battle {
+    --tray-h: 118px;
+  }
+
+  .tray {
+    background: linear-gradient(180deg, transparent, rgba(5, 8, 12, 0.6) 30%, rgba(5, 8, 12, 0.85));
+  }
+
+  .tray-left {
+    left: 8px;
+    bottom: 10px;
+    gap: 8px;
+    align-items: flex-end;
+  }
+
+  .energy-orb {
+    width: 60px;
+    height: 60px;
+  }
+
+  .orb-num {
+    font-size: 1.35rem;
+  }
+
+  .tray-right {
+    right: 8px;
+    bottom: 8px;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
+
+  .end-turn {
+    padding: 6px 12px 5px;
+  }
+
+  .pile {
+    width: 36px;
+    height: 36px;
+  }
+
+  .ally {
+    left: 2%;
+    width: min(26vw, 250px);
+    top: 54%;
     transform: translateY(-50%);
+  }
+
+  .foes {
+    left: 32%;
+    right: 2%;
+    top: 30px;
+    bottom: 0;
+    flex-direction: row;
+    justify-content: space-evenly;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .stage.chase-enemy .ally {
+    left: auto;
+    right: 2%;
+  }
+
+  .stage.chase-enemy .foes {
+    left: 2%;
+    right: 32%;
+  }
+
+  .foe,
+  .n2 .foe,
+  .n3 .foe {
+    width: min(24vw, 230px);
+  }
+
+  .n2 .foe:nth-child(2) {
+    margin-top: 22px !important;
+  }
+
+  .foe.boss {
+    width: min(30vw, 270px);
+  }
+
+  .n2 .foe .unit-art,
+  .n3 .foe .unit-art {
+    width: 88%;
+  }
+
+  .nameplate small {
+    display: none;
+  }
+
+  .unit-hud {
+    width: min(100%, 150px);
+  }
+
+  .intent-ico {
+    width: 24px;
+    height: 24px;
+  }
+
+  .intent-ico .ico {
+    width: 22px;
+    height: 22px;
+  }
+
+  .intent > b {
+    font-size: 1.15rem;
+  }
+
+  .card-preview {
+    top: 8px;
+    bottom: auto;
+  }
+
+  .hangar-screen {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr;
+    column-gap: 12px;
+    padding: 0 12px 12px;
+  }
+
+  .hangar-main {
+    display: contents;
+  }
+
+  .hangar-screen > .screen-head {
+    grid-column: 1 / -1;
+    padding: 8px 0 2px;
+  }
+
+  .hangar-stage {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .hangar-jet {
+    width: min(100%, 340px);
+  }
+
+  .hangar-plate {
+    margin-top: 4px;
+  }
+
+  .plate-code {
+    font-size: 1.8rem;
+  }
+
+  .plate-name {
+    font-size: 1.05rem;
+  }
+
+  .hangar-roster {
+    grid-column: 1;
+    grid-row: 3;
+    align-self: start;
+    padding: 8px 0 0;
+  }
+
+  .hangar-info {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    align-self: start;
+  }
+
+  .reward-screen,
+  .deck-screen,
+  .event-screen,
+  .ending-screen {
+    padding-top: 30px;
+  }
+
+  .ribbon {
+    font-size: 1.1rem;
+    padding: 7px 30px 9px;
+    margin-top: -34px;
+  }
+
+  .pick-row {
+    padding-top: 8px;
+  }
+
+  .reward-panel {
+    display: grid;
+    grid-template-columns: minmax(200px, 1fr) auto;
+    column-gap: 18px;
+    align-items: start;
+  }
+
+  .reward-panel > .ribbon,
+  .reward-panel > .btn-row {
+    grid-column: 1 / -1;
+  }
+
+  .reward-panel > .reward-note,
+  .reward-panel > .loot-list {
+    grid-column: 1;
+  }
+
+  .reward-panel > .pick-head {
+    grid-column: 2;
+    grid-row: 2;
+    margin-top: 0;
+  }
+
+  .reward-panel > .pick-row {
+    grid-column: 2;
+    grid-row: 3 / span 2;
+  }
+
+  .pick-row .card {
+    --cw: 104px;
+  }
+
+  .ware .card {
+    --cw: 100px;
+  }
+
+  .card.pick-armed,
+  .card.pick-armed:hover:not(:disabled) {
+    transform: scale(1.3);
+  }
+
+  .shop-screen {
+    gap: 10px;
+    padding-top: 10px;
   }
 }

@@ -6,7 +6,7 @@ export interface AppState {
   run: RunState | null;
   jetPick: JetId;
   seedInput: string;
-  modal: null | "deck" | "abort" | "confirm-new";
+  modal: null | "deck" | "abort" | "confirm-new" | "settings";
   deckTab: "loadout" | "draw" | "discard" | "exhaust";
   targetUid: number | null;
   toast: string;
@@ -20,4 +20,6 @@ export interface AppState {
   showLog: boolean;
   /** Battle snapshot drawn while the final blows of a fight play out. */
   frozen: RunState | null;
+  /** On phones, the reward or shop card tapped once and waiting for a confirming tap. */
+  pickArm: string | null;
 }

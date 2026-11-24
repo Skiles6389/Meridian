@@ -34,6 +34,14 @@ export function isCompact(): boolean {
   return w <= 720 || h <= 560;
 }
 
+/** Phone layouts: "landscape" is a short, wide screen; "portrait" is a narrow one. */
+export function phoneShape(): "portrait" | "landscape" | null {
+  const { w, h } = viewport();
+  if (h <= 560 && w > h) return "landscape";
+  if (w <= 720 || h <= 560) return "portrait";
+  return null;
+}
+
 /* ------------------------------------------------------------------ scene */
 
 /** Which painted backdrop sits behind the current screen. */
@@ -140,7 +148,7 @@ function hud(app: AppState): string {
         <button class="hud-btn" data-act="deck" title="Deck">${icon("deck")}<i>${run.deck.length}</i></button>
         <button class="hud-btn" data-act="how" title="How to fly">${icon("help")}</button>
         <button class="hud-btn" data-act="mute" title="${app.meta.mute ? "Audio off" : "Audio on"}">${icon(app.meta.mute ? "soundOff" : "soundOn")}</button>
-        <button class="hud-btn" data-act="save-quit" title="Save and step out">${icon("gear")}</button>
+        <button class="hud-btn" data-act="settings" title="Settings">${icon("gear")}</button>
       </div>
     </header>
     ${
@@ -173,7 +181,7 @@ function titleScreen(app: AppState): string {
           <div class="title-row">
             ${btn("Records", "records")}
             ${btn("How to fly", "how")}
-            ${btn(`${icon(app.meta.mute ? "soundOff" : "soundOn")}`, "mute", { cls: "square", title: app.meta.mute ? "Audio off" : "Audio on" })}
+            ${btn(`${icon("gear")}`, "settings", { cls: "square", title: "Settings" })}
           </div>
         </nav>
         <p class="fine">Real aircraft. Fictional squadrons and callsigns. Neutral markings only.</p>
@@ -525,19 +533,61 @@ interface Slot {
   r: number;
 }
 
-export function handLayout(n: number): { slots: Slot[]; cw: number } {
-  const { w: vw } = viewport();
-  const compact = isCompact();
-  const cw = compact ? Math.min(112, Math.max(92, vw / 4.1)) : vw < 1100 ? 150 : 170;
-  const room = compact ? vw - 56 : Math.min(980, vw - 440);
-  const gap = n > 1 ? Math.min(cw * 0.8, (room - cw) / (n - 1)) : 0;
-  const tilt = compact ? 2.4 : 3.6;
+export interface HandLayout {
+  slots: Slot[];
+  cw: number;
+  /** Card height in the hand; shorter than a full card when `mini`. */
+  ch: number;
+  /** Phone hands show name-and-art cards; the rules text lives in the tap preview. */
+  mini: boolean;
+  trayH: number | null;
+  /** Width of the tap-to-preview card on phones. */
+  pw: number;
+}
+
+const HAND_GAP = 4;
+
+export function handLayout(n: number): HandLayout {
+  const { w: vw, h: vh } = viewport();
+  const shape = phoneShape();
+  if (!shape) {
+    const cw = vw < 1100 ? 150 : 170;
+    const room = Math.min(980, vw - 440);
+    const gap = n > 1 ? Math.min(cw * 0.8, (room - cw) / (n - 1)) : 0;
+    const slots: Slot[] = [];
+    for (let i = 0; i < n; i++) {
+      const o = i - (n - 1) / 2;
+      slots.push({ x: o * gap, y: Math.abs(o) ** 1.6 * 4, r: o * 3.6 * Math.min(1, 6 / Math.max(n, 1)) });
+    }
+    return { slots, cw, ch: Math.round(cw * 1.4), mini: false, trayH: null, pw: 0 };
+  }
+  const landscape = shape === "landscape";
+  // Landscape keeps the energy and End turn clusters beside the hand instead of above it.
+  const room = landscape ? vw - 2 * 128 : vw - 12;
+  const fit = n > 0 ? (room - (n - 1) * HAND_GAP) / n : room;
+  const cw = Math.round(Math.max(58, Math.min(landscape ? 80 : 104, fit)));
+  const mini = cw < 96;
+  const ch = Math.round(cw * (mini ? 1.32 : 1.4));
+  const step = n > 1 ? Math.min(cw + HAND_GAP, (room - cw) / (n - 1)) : 0;
   const slots: Slot[] = [];
   for (let i = 0; i < n; i++) {
     const o = i - (n - 1) / 2;
-    slots.push({ x: o * gap, y: Math.abs(o) ** 1.6 * (compact ? 2.6 : 4), r: o * tilt * Math.min(1, 6 / Math.max(n, 1)) });
+    slots.push({ x: o * step, y: mini ? 0 : Math.abs(o) ** 1.6 * 2, r: mini ? 0 : o * 1.6 });
   }
-  return { slots, cw: Math.round(cw) };
+  const trayH = landscape ? Math.max(ch + 12, 112) : ch + 88;
+  const stageH = vh - 50 - trayH;
+  const pw = landscape ? Math.min(190, vw * 0.3, (vh - 50 - 46) / 1.4) : Math.min(200, vw * 0.46, (stageH - 40) / 1.4);
+  return { slots, cw, ch, mini, trayH, pw: Math.round(pw) };
+}
+
+function previewHint(run: RunState, index: number, playable: boolean, targetUid: number | null): string {
+  const def = getCard(run.combat!.hand[index].id);
+  if (!playable) return "Not enough energy";
+  const living = run.combat!.enemies.filter((enemy) => enemy.hp > 0);
+  if (def.target === "enemy" && living.length > 1) {
+    return living.some((enemy) => enemy.uid === targetUid) ? "Tap to fire at the marked target, or tap another" : "Tap a target to fire";
+  }
+  return "Tap the card again to play";
 }
 
 function battle(app: AppState): string {
@@ -580,8 +630,19 @@ function battle(app: AppState): string {
   const orbMax = Math.max(combat.maxEnergy, 1);
   const anyPlayable = !frozen && combat.hand.some((inst) => combat.energy >= cardCost(run, getCard(inst.id)));
   const needsTarget = app.armed !== null && combat.hand[app.armed] && getCard(combat.hand[app.armed].id).target === "enemy" && living.length > 1;
+  let preview = "";
+  if (!frozen && layout.pw && app.armed !== null && combat.hand[app.armed]) {
+    const def = getCard(combat.hand[app.armed].id);
+    const cost = cardCost(run, def);
+    const playable = combat.outcome === "fight" && combat.energy >= cost;
+    preview = `<div class="card-preview" style="--pw:${layout.pw}px">
+      ${cardFace(def, { cost, tag: "button", cls: playable ? "playable" : "unplayable", attrs: `data-act="preview-play" data-arg="${app.armed}"` })}
+      <p class="preview-hint">${previewHint(run, app.armed, playable, app.targetUid)}</p>
+    </div>`;
+  }
+  const vars = `--cw:${layout.cw}px;--ch:${layout.ch}px${layout.trayH ? `;--tray-h:${layout.trayH}px` : ""}`;
   return `
-    <section class="battle n${combat.enemies.length} ${frozen ? "frozen" : ""} ${needsTarget ? "aiming" : ""}" style="--cw:${layout.cw}px">
+    <section class="battle n${combat.enemies.length} ${frozen ? "frozen" : ""} ${needsTarget ? "aiming" : ""}" style="${vars}">
       <div class="stage chase-player">
         <div class="contact-tag"><span>${esc(combat.encounterName)}</span><b>Turn ${combat.turn}</b></div>
         <div class="ally" data-who="-1">
@@ -603,7 +664,7 @@ function battle(app: AppState): string {
           </div>
           <button class="pile pile-draw" data-act="deck-draw" title="Draw pile">${icon("deck")}<i>${combat.draw.length}</i></button>
         </div>
-        <div class="hand">${hand || (frozen ? "" : `<p class="empty-hand">No cards in hand.</p>`)}</div>
+        <div class="hand ${layout.mini ? "mini" : ""}">${hand || (frozen ? "" : `<p class="empty-hand">No cards in hand.</p>`)}</div>
         <div class="tray-right">
           <button class="end-turn ${anyPlayable ? "" : "ready"}" data-act="end-turn" ${frozen ? "disabled" : ""}>
             <span>End turn</span>
@@ -617,7 +678,8 @@ function battle(app: AppState): string {
       </div>
       <button class="log-toggle ${app.showLog ? "on" : ""}" data-act="toggle-log" title="Combat log">${icon("log")}</button>
       ${app.showLog ? `<div class="log-panel" aria-live="polite">${combat.log.slice(-14).map((line) => `<p>${esc(line)}</p>`).join("")}</div>` : ""}
-      ${needsTarget ? `<div class="aim-hint">Choose a target</div>` : ""}
+      ${needsTarget && !preview ? `<div class="aim-hint">Choose a target</div>` : ""}
+      ${preview}
     </section>
   `;
 }
@@ -632,8 +694,8 @@ function reward(app: AppState): string {
     .map((id) =>
       cardFace(getCard(id), {
         tag: "button",
-        cls: `pick ${state.cardTaken ? "spent" : ""}`,
-        attrs: `data-act="take-card" data-arg="${esc(id)}" ${state.cardTaken ? "disabled" : ""}`,
+        cls: `pick ${state.cardTaken ? "spent" : ""} ${app.pickArm === `take-card:${id}` ? "pick-armed" : ""}`,
+        attrs: `data-act="take-card" data-arg="${esc(id)}" data-hint="Tap again to take" ${state.cardTaken ? "disabled" : ""}`,
       }),
     )
     .join("");
@@ -678,7 +740,7 @@ function shop(app: AppState): string {
       const poor = run.gold < offer.price;
       return `
         <div class="ware ${offer.sold ? "sold" : ""}">
-          ${cardFace(def, { tag: "button", cls: "buy", attrs: `data-act="buy-card" data-arg="${index}" ${offer.sold || poor ? "disabled" : ""}` })}
+          ${cardFace(def, { tag: "button", cls: `buy ${app.pickArm === `buy-card:${index}` ? "pick-armed" : ""}`, attrs: `data-act="buy-card" data-arg="${index}" data-hint="Tap again to buy" ${offer.sold || poor ? "disabled" : ""}` })}
           <span class="price ${poor && !offer.sold ? "poor" : ""}">${offer.sold ? "Sold" : `${icon("coin")}${offer.price}`}</span>
         </div>`;
     })
@@ -878,6 +940,34 @@ function deckModal(app: AppState): string {
     </div>`;
 }
 
+function slider(key: "music" | "sfx", label: string, value: number): string {
+  const pct = Math.round(value * 100);
+  return `<label class="slider"><span>${label}</span><input type="range" min="0" max="100" step="5" value="${pct}" data-vol="${key}" aria-label="${label} volume" /><b data-vol-label="${key}">${pct}%</b></label>`;
+}
+
+function settingsModal(app: AppState): string {
+  const meta = app.meta;
+  const inRun = app.view === "run" && !!app.run && !app.run.closed;
+  return `
+    <div class="modal" data-act="close-modal">
+      <div class="modal-card panel ornate settings-modal" data-act="stop">
+        <div class="modal-head"><h2>Settings</h2>${btn("Close", "close-modal", { cls: "ghost" })}</div>
+        <div class="settings-body">
+          ${slider("music", "Music", meta.musicVol)}
+          ${slider("sfx", "Effects", meta.sfxVol)}
+          <button class="toggle ${meta.mute ? "on" : ""}" data-act="mute" aria-pressed="${meta.mute}">
+            ${icon(meta.mute ? "soundOff" : "soundOn")}<span>Mute all sound</span><i>${meta.mute ? "On" : "Off"}</i>
+          </button>
+          <p class="fine">Every sound and song is synthesized live in the browser. Press M to mute.</p>
+        </div>
+        <div class="btn-row center">
+          ${btn("How to fly", "how", { cls: "ghost" })}
+          ${inRun ? btn("Save and step out", "save-quit", { cls: "danger" }) : ""}
+        </div>
+      </div>
+    </div>`;
+}
+
 function confirmModal(title: string, body: string, yes: string, act: string): string {
   return `
     <div class="modal">
@@ -927,6 +1017,7 @@ export function renderApp(app: AppState): string {
   const toast = app.toast ? `<div class="toast ${app.toastKind}">${esc(app.toast)}</div>` : "";
   let modal = "";
   if (app.modal === "deck" && app.run) modal = deckModal(app);
+  else if (app.modal === "settings") modal = settingsModal(app);
   else if (app.modal === "abort") modal = confirmModal("Save and step out?", "The sortie stays in this browser.", "To title", "quit-confirm");
   else if (app.modal === "confirm-new") {
     modal = confirmModal("Scrap the current sortie?", "The airframe in progress will be marked as a loss.", "Scrap and launch", "launch-confirm");

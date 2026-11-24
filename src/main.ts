@@ -5,10 +5,10 @@ import "@fontsource/barlow-condensed/latin-700.css";
 import "@fontsource/barlow-condensed/latin-800.css";
 import "@fontsource/saira-stencil-one/latin-400.css";
 import "./styles.css";
-import { setMuted, sfx, unlockAudio } from "./audio";
+import { audioDebug, configureAudio, setAmbience, setMusic, sfx, unlockAudio, type Track } from "./audio";
 import { getCard } from "./game/cards";
 import { enemiesTakeLead, splitTurnEvents } from "./game/chase";
-import { setCombatFxSink, type ActionResult, type CombatFx } from "./game/combat";
+import { PLAYER, setCombatFxSink, type ActionResult, type CombatFx } from "./game/combat";
 import { HELP } from "./game/help";
 import { loadMeta, loadRun, saveMeta, saveRun } from "./game/meta";
 import {
@@ -54,11 +54,11 @@ import {
   type ShotStyle,
 } from "./ui/fx";
 import type { AppState } from "./ui/model";
-import { isCompact, renderApp, sceneKey, screenName } from "./ui/render";
+import { isCompact, phoneShape, renderApp, sceneKey, screenName } from "./ui/render";
 import { initScene, setScene } from "./ui/scene";
 
 const meta = loadMeta();
-setMuted(meta.mute);
+configureAudio({ mute: meta.mute, music: meta.musicVol, sfx: meta.sfxVol });
 
 const app: AppState = {
   view: "title",
@@ -78,12 +78,33 @@ const app: AppState = {
   armed: null,
   showLog: false,
   frozen: null,
+  pickArm: null,
 };
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
 initScene();
 initFx(root);
+
+for (const type of ["pointerdown", "pointerup", "touchend", "keydown"]) window.addEventListener(type, unlockAudio, { capture: true, passive: true });
+
+function musicFor(app: AppState): Track {
+  const run = app.frozen ?? app.run;
+  if (app.view !== "run" || !run) return "title";
+  if (run.screen === "victory" || run.screen === "defeat") return "title";
+  if ((run.screen === "combat" || app.frozen) && run.combat?.enemies.some((enemy) => enemy.boss)) return "boss";
+  return run.act >= 3 ? "act3" : run.act === 2 ? "act2" : "act1";
+}
+
+let lastGold: number | null = null;
+
+function syncAudio() {
+  setMusic(musicFor(app));
+  setAmbience(app.view === "run" && (!!app.frozen || app.run?.screen === "combat"));
+  const gold = app.view === "run" ? app.run?.gold ?? null : null;
+  if (gold !== null && lastGold !== null && gold !== lastGold) sfx("gold");
+  lastGold = gold;
+}
 
 let toastTimer = 0;
 let lastScreen = "";
@@ -98,6 +119,7 @@ function persist() {
 
 function draw() {
   setScene(sceneKey(app));
+  syncAudio();
   const scroller = root!.querySelector<HTMLElement>("[data-scroll]");
   const keepScroll = scroller ? scroller.scrollTop : null;
   root!.innerHTML = renderApp(app);
@@ -203,7 +225,17 @@ function barsOf(run: RunState): Map<number, { hp: number; shield: number }> {
   return bars;
 }
 
-async function combatAction(perform: () => ActionResult | void, opts: { shot: ShotStyle; thrown?: ReturnType<typeof cardSnapshot>; attack?: boolean; turn?: boolean }) {
+interface ActionOpts {
+  shot: ShotStyle;
+  thrown?: ReturnType<typeof cardSnapshot>;
+  attack?: boolean;
+  turn?: boolean;
+  /** Unit the thrown card flies into, or null for the middle of the stage. */
+  aimAt?: number | null;
+  cardType?: string;
+}
+
+async function combatAction(perform: () => ActionResult | void, opts: ActionOpts) {
   const run = app.run;
   if (!run?.combat || busy) return;
   const pre = structuredClone(run);
@@ -235,7 +267,7 @@ async function combatAction(perform: () => ActionResult | void, opts: { shot: Sh
   draw();
   document.body.classList.add("busy");
   try {
-    if (opts.thrown) throwCard(opts.thrown, !!opts.attack);
+    if (opts.thrown) throwCard(opts.thrown, !!opts.attack, opts.aimAt ?? null, opts.cardType ?? "attack");
     else if (!opts.turn) sfx("play");
     const hand = root!.querySelector<HTMLElement>(".hand");
     if (!ended && !opts.turn) flipHand(rects, false);
@@ -250,7 +282,7 @@ async function combatAction(perform: () => ActionResult | void, opts: { shot: Sh
         pendingDown.add(enemy.uid);
       }
     }
-    if (opts.thrown) await wait(opts.attack ? 200 : 120);
+    if (opts.thrown) await wait(opts.attack ? 260 : 170);
     const ctx = { playerShot: opts.shot, bars: barsOf(pre), pendingDown };
     if (opts.turn) {
       const timeline = splitTurnEvents(events);
@@ -292,10 +324,14 @@ function play(index: number, uid: number | null) {
   const def = getCard(inst.id);
   if (def.target === "enemy" && uid !== null) app.targetUid = uid;
   const thrown = cardSnapshot(index);
+  const single = run.combat?.enemies.find((enemy) => enemy.hp > 0)?.uid ?? null;
+  const aimAt = def.target === "enemy" ? uid ?? (targetAlive(app.targetUid) ? app.targetUid : single) : def.target === "all" ? null : PLAYER;
   void combatAction(() => playCard(run, app.meta, index, uid), {
     shot: def.type === "attack" ? shotStyle(def.id) : "zap",
     thrown,
     attack: def.type === "attack",
+    aimAt,
+    cardType: def.type,
   });
 }
 
@@ -333,11 +369,20 @@ function clickCard(index: number, touch: boolean) {
   play(index, app.targetUid);
 }
 
+function previewPlay(index: number) {
+  if (!needsTarget(index)) {
+    play(index, null);
+    return;
+  }
+  if (targetAlive(app.targetUid)) play(index, app.targetUid);
+  else toast("Tap an enemy to fire.", "info");
+}
+
 /* ------------------------------------------------------------- hand UI */
 
 function hoverHand(index: number | null) {
   const slots = root!.querySelectorAll<HTMLElement>(".hand .slot");
-  const cw = Number.parseFloat(root!.querySelector<HTMLElement>(".hand")?.style.getPropertyValue("--cw") ?? "160") || 160;
+  const cw = Number.parseFloat(root!.querySelector<HTMLElement>(".battle")?.style.getPropertyValue("--cw") ?? "160") || 160;
   slots.forEach((slot, i) => {
     if (index === null) {
       slot.classList.remove("hover");
@@ -473,8 +518,9 @@ function onClick(event: MouseEvent) {
   }
   const target = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-act]");
   if (!target) {
-    if (app.armed !== null) {
+    if (app.armed !== null || app.pickArm !== null) {
       app.armed = null;
+      app.pickArm = null;
       aim(null, null, false);
       draw();
     }
@@ -488,6 +534,10 @@ function onClick(event: MouseEvent) {
 
   if (act === "play" && app.run) {
     clickCard(Number(arg), touch);
+    return;
+  }
+  if (act === "preview-play" && app.run) {
+    previewPlay(Number(arg));
     return;
   }
   if (act === "target" && app.run?.combat) {
@@ -506,18 +556,31 @@ function onClick(event: MouseEvent) {
     return;
   }
 
+  if ((act === "take-card" || act === "buy-card") && touch && phoneShape()) {
+    const key = `${act}:${arg}`;
+    if (app.pickArm !== key) {
+      app.pickArm = key;
+      sfx("click");
+      draw();
+      return;
+    }
+  }
+  app.pickArm = null;
+
   const beforeScreen = app.run?.screen;
   const beforeNotices = app.run?.notices.length ?? 0;
   const beforeView = app.view;
 
   if (act === "mute") {
-    app.meta.mute = !app.meta.mute;
-    setMuted(app.meta.mute);
+    toggleMute();
+  } else if (act === "settings") {
+    app.modal = "settings";
     sfx("click");
   } else if (act === "title") {
     app.view = "title";
     app.modal = null;
   } else if (act === "how") {
+    app.modal = null;
     if (app.view !== "how") app.returnView = app.view === "run" ? "run" : "title";
     app.view = "how";
     app.howPage = 0;
@@ -650,6 +713,7 @@ async function enterFight(fromMap: boolean) {
     busy = true;
     try {
       await wait(300);
+      sfx("boss");
       await banner(boss.name, boss.epithet, "boss");
     } finally {
       busy = false;
@@ -658,14 +722,41 @@ async function enterFight(fromMap: boolean) {
 }
 
 root.addEventListener("click", onClick);
+function toggleMute() {
+  app.meta.mute = !app.meta.mute;
+  configureAudio({ mute: app.meta.mute });
+  sfx("click");
+}
+
 root.addEventListener("input", (event) => {
   const target = event.target as HTMLInputElement | null;
   if (target?.dataset.act === "seed") app.seedInput = target.value;
+  const key = target?.dataset.vol;
+  if (key === "music" || key === "sfx") {
+    const value = Number(target!.value) / 100;
+    if (key === "music") app.meta.musicVol = value;
+    else app.meta.sfxVol = value;
+    configureAudio({ [key]: value });
+    const label = root!.querySelector(`[data-vol-label="${key}"]`);
+    if (label) label.textContent = `${Math.round(value * 100)}%`;
+  }
+});
+root.addEventListener("change", (event) => {
+  const key = (event.target as HTMLInputElement | null)?.dataset.vol;
+  if (!key) return;
+  saveMeta(app.meta);
+  if (key === "sfx") sfx("hit");
 });
 
 window.addEventListener("keydown", (event) => {
   const tag = (event.target as HTMLElement | null)?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return;
+  if (event.key === "m" || event.key === "M") {
+    toggleMute();
+    persist();
+    if (app.modal === "settings") draw();
+    return;
+  }
   if (event.key === "Escape") {
     app.modal = null;
     app.relicId = null;
@@ -701,5 +792,6 @@ window.addEventListener("resize", () => {
 });
 
 if (import.meta.env.DEV) (window as unknown as { __dogfight: unknown }).__dogfight = { app, draw, persist };
+(window as unknown as { __dogfightAudio: unknown }).__dogfightAudio = audioDebug;
 
 draw();
