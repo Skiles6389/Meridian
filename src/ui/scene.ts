@@ -64,7 +64,7 @@ function chaseScene(act: number): string {
       : act === 2
         ? `<div class="sc-haze"></div><div class="sc-embers">${particles("ember", 22, 7)}</div>`
         : `<div class="sc-aurora a1"></div><div class="sc-stars">${particles("star", 40, 3)}</div>`;
-  return `${sky(`chase-act${act}`)}${extra}${wisps(act === 3 ? 4 : 7, 40 + act)}${rushLines(18, 50 + act)}`;
+  return `${sky(`chase-act${act}`)}<div class="sc-banks"><i class="bank far"></i><i class="bank near"></i></div>${extra}${wisps(act === 3 ? 4 : 7, 40 + act)}${rushLines(18, 50 + act)}`;
 }
 
 function build(key: string): string {

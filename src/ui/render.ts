@@ -467,7 +467,7 @@ function mapScreen(app: AppState): string {
         node.type === "boss"
           ? `<span class="seal">${bossArt}</span><span class="seal-label">Boss</span>`
           : `<span class="stamp">${nodeIcon(node.type)}</span>`;
-      return `<button class="node ${flags}" data-act="select-node" data-arg="${esc(node.id)}" style="left:${p.x.toFixed(1)}px;top:${p.y.toFixed(1)}px" title="${NODE_NAME[node.type]}">${inner}<span class="node-ring"></span><span class="node-x"></span></button>`;
+      return `<button class="node ${flags}" data-act="select-node" data-arg="${esc(node.id)}" style="left:${p.x.toFixed(1)}px;top:${p.y.toFixed(1)}px;--row:${node.row}" title="${NODE_NAME[node.type]}">${inner}<span class="node-ring"></span><span class="node-x"></span></button>`;
     })
     .join("");
 
