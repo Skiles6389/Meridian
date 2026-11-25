@@ -26,7 +26,46 @@ export type Cue =
   | "unlock"
   | "whoosh"
   | "gold"
-  | "boss";
+  | "boss"
+  | "flare"
+  | "chaff"
+  | "lock"
+  | "ping"
+  | "glitch"
+  | "laser"
+  | "brrt"
+  | "rocket"
+  | "bomb"
+  | "slash"
+  | "plate"
+  | "shieldUp"
+  | "cloak"
+  | "burner"
+  | "vent"
+  | "repair"
+  | "tape"
+  | "reload"
+  | "power"
+  | "crack"
+  | "system"
+  | "flyby"
+  | "tick"
+  | "shuffle"
+  | "discard"
+  | "exhaust"
+  | "energy"
+  | "crit"
+  | "flip"
+  | "node"
+  | "travel";
+
+/** Every cue, for tests that check effect recipes name real sounds. */
+export const CUE_NAMES: Cue[] = [
+  "click", "draw", "play", "cannon", "missile", "heavy", "zap", "hit", "hitBig", "explode", "shield", "block", "heal", "hurt", "evade", "error",
+  "turn", "win", "lose", "unlock", "whoosh", "gold", "boss", "flare", "chaff", "lock", "ping", "glitch", "laser", "brrt", "rocket", "bomb", "slash",
+  "plate", "shieldUp", "cloak", "burner", "vent", "repair", "tape", "reload", "power", "crack", "system", "flyby", "tick", "shuffle", "discard",
+  "exhaust", "energy", "crit", "flip", "node", "travel",
+];
 
 export type Track = "title" | "act1" | "act2" | "act3" | "boss";
 
@@ -337,6 +376,163 @@ const CUES: Record<Cue, (t: number) => void> = {
       tone({ type: "sawtooth", freq: i % 2 ? 330 : 440, dur: 0.22, gain: 0.06, at: t + i * 0.22, attack: 0.02, filter: { type: "lowpass", freq: 1500 } });
     }
     tone({ type: "sine", freq: 55, dur: 1.5, gain: 0.18, at: t, attack: 0.1 });
+  },
+  flare: (t) => {
+    for (let i = 0; i < 4; i++) {
+      const at = t + i * 0.035;
+      hiss({ dur: 0.09, gain: 0.16, at, filter: { type: "bandpass", freq: 2600 + i * 300, q: 1.4 } });
+      tone({ type: "sine", freq: 210, to: 90, dur: 0.07, gain: 0.1, at });
+    }
+    hiss({ dur: 0.55, gain: 0.07, at: t + 0.05, attack: 0.05, filter: { type: "highpass", freq: 3800 } });
+  },
+  chaff: (t) => {
+    tone({ type: "sine", freq: 160, to: 70, dur: 0.09, gain: 0.14, at: t });
+    hiss({ dur: 0.5, gain: 0.12, at: t, attack: 0.02, filter: { type: "highpass", freq: 5200 } });
+    for (let i = 0; i < 6; i++) tone({ type: "triangle", freq: 3200 + Math.random() * 2400, dur: 0.05, gain: 0.012, at: t + 0.04 + Math.random() * 0.3 });
+  },
+  lock: (t) => {
+    tone({ type: "square", freq: 1480, dur: 0.045, gain: 0.03, at: t, filter: { type: "lowpass", freq: 4200 } });
+    tone({ type: "square", freq: 1480, dur: 0.045, gain: 0.03, at: t + 0.085, filter: { type: "lowpass", freq: 4200 } });
+    tone({ type: "square", freq: 1976, dur: 0.16, gain: 0.035, at: t + 0.17, filter: { type: "lowpass", freq: 4800 } });
+  },
+  ping: (t) => {
+    tone({ type: "sine", freq: 1320, to: 1180, dur: 0.5, gain: 0.07, at: t, attack: 0.004 });
+    tone({ type: "sine", freq: 2640, to: 2360, dur: 0.3, gain: 0.02, at: t });
+    tone({ type: "sine", freq: 1320, to: 1180, dur: 0.35, gain: 0.02, at: t + 0.19 });
+  },
+  glitch: (t) => {
+    for (let i = 0; i < 6; i++) {
+      const at = t + i * 0.035 + Math.random() * 0.015;
+      tone({ type: "square", freq: 300 + Math.random() * 2600, dur: 0.03, gain: 0.028, at, filter: { type: "bandpass", freq: 1800, q: 0.6 } });
+    }
+    hiss({ dur: 0.26, gain: 0.1, at: t, filter: { type: "bandpass", freq: 3400, q: 0.5 }, rate: 0.5 });
+  },
+  laser: (t) => {
+    tone({ type: "sawtooth", freq: 880, to: 620, dur: 0.34, gain: 0.05, at: t, attack: 0.02, filter: { type: "bandpass", freq: 1800, q: 2 } });
+    tone({ type: "sine", freq: 1760, to: 1240, dur: 0.3, gain: 0.03, at: t, attack: 0.02 });
+    hiss({ dur: 0.3, gain: 0.04, at: t, attack: 0.03, filter: { type: "highpass", freq: 5000 } });
+  },
+  brrt: (t) => {
+    // One long burst: a buzzing rotary cannon rather than separate reports.
+    tone({ type: "sawtooth", freq: 74, to: 62, dur: 0.62, gain: 0.16, at: t, attack: 0.02, filter: { type: "lowpass", freq: 900 } });
+    tone({ type: "square", freq: 148, to: 124, dur: 0.6, gain: 0.05, at: t, attack: 0.02, filter: { type: "lowpass", freq: 1600 } });
+    hiss({ dur: 0.62, gain: 0.22, at: t, attack: 0.03, filter: { type: "bandpass", freq: 1500, q: 0.6 } });
+    hiss({ dur: 0.5, gain: 0.08, at: t + 0.15, attack: 0.1, filter: { type: "lowpass", freq: 500 } });
+  },
+  rocket: (t) => {
+    for (let i = 0; i < 4; i++) {
+      const at = t + i * 0.045;
+      hiss({ dur: 0.26, gain: 0.13, at, attack: 0.01, filter: { type: "bandpass", freq: 2200, to: 700, q: 1.6 } });
+      tone({ type: "sine", freq: 190, to: 80, dur: 0.08, gain: 0.1, at });
+    }
+  },
+  bomb: (t) => {
+    tone({ type: "sine", freq: 90, to: 60, dur: 0.1, gain: 0.16, at: t });
+    tone({ type: "sine", freq: 1500, to: 520, dur: 0.46, gain: 0.03, at: t + 0.04, attack: 0.08 });
+    hiss({ dur: 0.4, gain: 0.05, at: t + 0.04, attack: 0.15, filter: { type: "bandpass", freq: 1200, to: 500, q: 2 } });
+  },
+  slash: (t) => {
+    hiss({ dur: 0.2, gain: 0.2, at: t, attack: 0.05, filter: { type: "bandpass", freq: 900, to: 5200, q: 1.3 } });
+    tone({ type: "triangle", freq: 2400, to: 900, dur: 0.1, gain: 0.03, at: t + 0.1 });
+  },
+  plate: (t) => {
+    for (let i = 0; i < 3; i++) {
+      const at = t + 0.12 + i * 0.055;
+      tone({ type: "square", freq: 190 - i * 20, to: 80, dur: 0.07, gain: 0.07, at, filter: { type: "lowpass", freq: 1100 } });
+      hiss({ dur: 0.04, gain: 0.14, at, filter: { type: "bandpass", freq: 2800, q: 1 } });
+      tone({ type: "sine", freq: 880 + i * 120, dur: 0.2, gain: 0.018, at });
+    }
+  },
+  shieldUp: (t) => {
+    tone({ type: "sine", freq: 330, to: 660, dur: 0.34, gain: 0.08, at: t, attack: 0.03 });
+    tone({ type: "sine", freq: 495, to: 990, dur: 0.34, gain: 0.04, at: t + 0.03, attack: 0.03 });
+    tone({ type: "triangle", freq: 1320, dur: 0.4, gain: 0.03, at: t + 0.22, attack: 0.01 });
+    hiss({ dur: 0.3, gain: 0.04, at: t, attack: 0.1, filter: { type: "highpass", freq: 4200 } });
+  },
+  cloak: (t) => {
+    hiss({ dur: 0.5, gain: 0.09, at: t, attack: 0.2, filter: { type: "bandpass", freq: 3200, to: 500, q: 2.2 } });
+    tone({ type: "sine", freq: 880, to: 220, dur: 0.45, gain: 0.03, at: t, attack: 0.05 });
+  },
+  burner: (t) => {
+    tone({ type: "sine", freq: 70, to: 46, dur: 0.6, gain: 0.3, at: t, attack: 0.02 });
+    hiss({ dur: 0.7, gain: 0.26, at: t, attack: 0.04, filter: { type: "lowpass", freq: 600, to: 2600 } });
+    tone({ type: "sawtooth", freq: 110, to: 190, dur: 0.5, gain: 0.04, at: t, attack: 0.05, filter: { type: "lowpass", freq: 700 } });
+  },
+  vent: (t) => {
+    hiss({ dur: 0.55, gain: 0.16, at: t, attack: 0.02, filter: { type: "highpass", freq: 2600, to: 700 } });
+    tone({ type: "sine", freq: 520, to: 180, dur: 0.4, gain: 0.02, at: t });
+  },
+  repair: (t) => {
+    for (let i = 0; i < 5; i++) hiss({ dur: 0.05, gain: 0.1, at: t + i * 0.06 + Math.random() * 0.02, filter: { type: "bandpass", freq: 4200 + Math.random() * 1500, q: 2 } });
+    [587, 740, 880].forEach((freq, i) => tone({ type: "triangle", freq, dur: 0.16, gain: 0.035, at: t + 0.18 + i * 0.06 }));
+  },
+  tape: (t) => {
+    for (let i = 0; i < 4; i++) {
+      const at = t + i * 0.075;
+      hiss({ dur: 0.07, gain: 0.14, at, attack: 0.02, filter: { type: "bandpass", freq: 1400, to: 3800, q: 2.5 } });
+      tone({ type: "square", freq: 240, to: 120, dur: 0.03, gain: 0.03, at: at + 0.06, filter: { type: "lowpass", freq: 1000 } });
+    }
+  },
+  reload: (t) => {
+    tone({ type: "square", freq: 420, to: 240, dur: 0.04, gain: 0.05, at: t, filter: { type: "lowpass", freq: 1800 } });
+    hiss({ dur: 0.04, gain: 0.12, at: t, filter: { type: "bandpass", freq: 3000, q: 1.5 } });
+    tone({ type: "square", freq: 620, to: 320, dur: 0.05, gain: 0.05, at: t + 0.1, filter: { type: "lowpass", freq: 2200 } });
+    hiss({ dur: 0.05, gain: 0.14, at: t + 0.1, filter: { type: "bandpass", freq: 2200, q: 1.5 } });
+    for (let i = 0; i < 4; i++) tone({ type: "triangle", freq: 2800 + Math.random() * 1400, dur: 0.05, gain: 0.014, at: t + 0.16 + i * 0.05 });
+  },
+  power: (t) => {
+    tone({ type: "sawtooth", freq: 110, to: 660, dur: 0.3, gain: 0.05, at: t, attack: 0.02, filter: { type: "lowpass", freq: 2400 } });
+    tone({ type: "sine", freq: 880, to: 1320, dur: 0.22, gain: 0.04, at: t + 0.2 });
+    hiss({ dur: 0.1, gain: 0.05, at: t, filter: { type: "highpass", freq: 5000 } });
+  },
+  crack: (t) => {
+    hiss({ dur: 0.07, gain: 0.3, at: t, filter: { type: "highpass", freq: 1800 } });
+    tone({ type: "square", freq: 320, to: 70, dur: 0.14, gain: 0.07, at: t, filter: { type: "lowpass", freq: 1500 } });
+    hiss({ dur: 0.2, gain: 0.1, at: t + 0.05, filter: { type: "bandpass", freq: 900, q: 1 } });
+  },
+  system: (t) => {
+    [440, 660, 880].forEach((freq, i) => tone({ type: "sine", freq, dur: 0.2, gain: 0.035, at: t + i * 0.05, attack: 0.01 }));
+    tone({ type: "triangle", freq: 1760, dur: 0.3, gain: 0.015, at: t + 0.15 });
+  },
+  flyby: (t) => {
+    hiss({ dur: 0.5, gain: 0.2, at: t, attack: 0.16, filter: { type: "bandpass", freq: 500, to: 2600, q: 1.4 } });
+    hiss({ dur: 0.4, gain: 0.12, at: t + 0.18, attack: 0.02, filter: { type: "lowpass", freq: 1600, to: 240 } });
+    tone({ type: "sawtooth", freq: 210, to: 120, dur: 0.5, gain: 0.03, at: t, attack: 0.1, filter: { type: "lowpass", freq: 700 } });
+  },
+  tick: (t) => {
+    tone({ type: "square", freq: 2100, dur: 0.02, gain: 0.02, at: t, filter: { type: "lowpass", freq: 5000 } });
+    hiss({ dur: 0.02, gain: 0.05, at: t, filter: { type: "bandpass", freq: 4000, q: 2 } });
+  },
+  shuffle: (t) => {
+    for (let i = 0; i < 7; i++) hiss({ dur: 0.045, gain: 0.07, at: t + i * 0.04, filter: { type: "bandpass", freq: 2000 + i * 260, q: 1.4 } });
+  },
+  discard: (t) => {
+    hiss({ dur: 0.12, gain: 0.08, at: t, attack: 0.01, filter: { type: "bandpass", freq: 3200, to: 1100, q: 1.2 } });
+  },
+  exhaust: (t) => {
+    hiss({ dur: 0.5, gain: 0.14, at: t, attack: 0.04, filter: { type: "bandpass", freq: 2600, to: 420, q: 0.9 } });
+    tone({ type: "sine", freq: 300, to: 90, dur: 0.4, gain: 0.04, at: t, attack: 0.02 });
+  },
+  energy: (t) => {
+    tone({ type: "sine", freq: 520, to: 1040, dur: 0.16, gain: 0.05, at: t, attack: 0.01 });
+    tone({ type: "triangle", freq: 1560, dur: 0.2, gain: 0.02, at: t + 0.09 });
+  },
+  crit: (t) => {
+    tone({ type: "sine", freq: 96, to: 30, dur: 0.5, gain: 0.5, at: t });
+    hiss({ dur: 0.1, gain: 0.3, at: t, filter: { type: "highpass", freq: 2400 } });
+    hiss({ dur: 0.6, gain: 0.3, at: t + 0.02, filter: { type: "lowpass", freq: 1800, to: 140 } });
+  },
+  flip: (t) => {
+    hiss({ dur: 0.06, gain: 0.1, at: t, filter: { type: "bandpass", freq: 3000, to: 5600, q: 1.2 } });
+    tone({ type: "triangle", freq: 880, to: 1320, dur: 0.07, gain: 0.025, at: t + 0.02 });
+  },
+  node: (t) => {
+    tone({ type: "triangle", freq: 660, dur: 0.07, gain: 0.03, at: t });
+    tone({ type: "triangle", freq: 990, dur: 0.12, gain: 0.03, at: t + 0.05 });
+  },
+  travel: (t) => {
+    hiss({ dur: 0.7, gain: 0.14, at: t, attack: 0.25, filter: { type: "bandpass", freq: 420, to: 1800, q: 1.2 } });
+    tone({ type: "sawtooth", freq: 120, to: 200, dur: 0.6, gain: 0.03, at: t, attack: 0.2, filter: { type: "lowpass", freq: 600 } });
   },
 };
 
