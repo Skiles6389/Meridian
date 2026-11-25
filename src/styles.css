@@ -372,10 +372,6 @@ button {
   animation-delay: calc(var(--d) * 0.16);
 }
 
-.sc-title .streak {
-  --peak: 0.45;
-}
-
 @keyframes streak {
   0% {
     transform: translateX(105vw);
@@ -979,8 +975,7 @@ button {
 }
 
 .unit-art .burner,
-.title-jet .burner,
-.title-foe .burner,
+.fb-jet .burner,
 .showcase .burner {
   opacity: 0.9;
   animation: burner 0.12s steps(2) infinite alternate;
@@ -1023,55 +1018,342 @@ button {
 
 /* -------------------------------------------------------------- title */
 
+/*
+ * The title backdrop. Each painting sits in a box of its own proportions, sized to cover the
+ * screen, so the afterburner glow placed in percentages stays on the jet at any size. Wide
+ * screens get the wide painting anchored to its right, where the jets are; tall screens get the
+ * tall one pinned to the top, fading into the dark panel that holds the logo and the menu.
+ */
+.sc-title {
+  --vh: 100vh;
+  --ink-sky: #0a0f20;
+  background: var(--ink-sky);
+}
+
+@supports (height: 100dvh) {
+  .sc-title {
+    --vh: 100dvh;
+  }
+}
+
+.key {
+  position: absolute;
+  translate: calc(var(--px, 0) * -10px) calc(var(--py, 0) * -6px);
+  transition: translate 0.8s ease-out;
+  animation: key-drift 26s ease-in-out infinite alternate;
+}
+
+.key img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+}
+
+.key-wide {
+  --kw: max(100vw, var(--vh) * 1.7778);
+  right: 0;
+  top: 50%;
+  width: var(--kw);
+  height: calc(var(--kw) / 1.7778);
+  margin-top: calc(var(--kw) / -3.5556);
+  transform-origin: 80% 60%;
+}
+
+.key-tall {
+  --kw: max(100vw, var(--vh) * 0.68 * 0.852);
+  --kh: calc(var(--kw) / 0.852);
+  display: none;
+  left: 50%;
+  top: clamp(var(--kh) * -0.06, var(--vh) - 400px - var(--kh) * 0.74, 0px);
+  width: var(--kw);
+  height: var(--kh);
+  margin-left: calc(var(--kw) / -2);
+  transform-origin: 40% 55%;
+}
+
+.key-tall::after {
+  content: "";
+  position: absolute;
+  inset: 0 -2% -2%;
+  background: linear-gradient(180deg, transparent 66%, rgba(10, 15, 32, 0.7) 82%, var(--ink-sky) 96%);
+}
+
+@keyframes key-drift {
+  from {
+    transform: scale(1.03);
+  }
+  to {
+    transform: scale(1.08) translate(-0.8%, -0.6%);
+  }
+}
+
+/* The lead jet's afterburner: a hot core that flickers over the painted nozzle. */
+.key-burn {
+  position: absolute;
+  width: 7%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 244, 214, 0.9) 0 12%, rgba(255, 176, 74, 0.55) 30%, rgba(255, 110, 40, 0.18) 55%, transparent 70%);
+  mix-blend-mode: screen;
+  animation: key-burn 0.18s steps(2) infinite alternate;
+}
+
+@keyframes key-burn {
+  from {
+    opacity: 0.55;
+    scale: 0.92;
+  }
+  to {
+    opacity: 1;
+    scale: 1.08;
+  }
+}
+
+.key-fade {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(7, 11, 24, 0.86), rgba(7, 11, 24, 0.5) 30%, transparent 58%),
+    linear-gradient(0deg, rgba(7, 11, 24, 0.55), transparent 30%);
+}
+
+/* Painted clouds streaming past: a slow sunlit layer high in the sky and a few big dark banks whipping by low. */
+.t-clouds {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  scale: var(--flow, 1) 1;
+}
+
+.t-cloud {
+  position: absolute;
+  left: 0;
+  top: calc(var(--top, 3%) + var(--y) * var(--band, 0.4));
+  width: calc(var(--size) * var(--w));
+  opacity: var(--alpha, 0.8);
+  will-change: transform;
+  animation: t-drift calc(var(--pace) * var(--t)) linear infinite;
+  animation-delay: calc(var(--pace) * var(--t) * var(--d));
+}
+
+.t-clouds.far {
+  --size: 26vmax;
+  --pace: 120s;
+  --band: 0.22;
+  --alpha: 0.92;
+}
+
+.t-clouds.near {
+  --size: 110vmax;
+  --pace: 17s;
+  --top: 62%;
+  --band: 0.3;
+  --alpha: 0.78;
+}
+
+.t-clouds.near .t-cloud {
+  animation-name: t-whip;
+}
+
+@keyframes t-drift {
+  from {
+    transform: translateX(104vw) scaleX(var(--mirror, 1));
+  }
+  to {
+    transform: translateX(-100%) scaleX(var(--mirror, 1));
+  }
+}
+
+/* A near cloud crosses in about a third of its cycle and is gone for the rest. */
+@keyframes t-whip {
+  0% {
+    transform: translateX(104vw) scaleX(var(--mirror, 1));
+  }
+  34%,
+  100% {
+    transform: translateX(-104%) scaleX(var(--mirror, 1));
+  }
+}
+
+.t-cloud.flip {
+  --mirror: -1;
+}
+
+/* Far pairs: one jet on another's tail, climbing out of frame through sky the painted jets leave free. */
+.t-flyby {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--fw, 5.2vmax);
+  font-size: var(--fw, 5.2vmax);
+  opacity: 0;
+  will-change: transform;
+  animation: t-flyby var(--cycle, 23s) linear infinite;
+  animation-delay: var(--wait, -3s);
+}
+
+@keyframes t-flyby {
+  0% {
+    transform: translate(var(--x0), var(--y0));
+    opacity: 0;
+  }
+  3% {
+    opacity: 1;
+  }
+  44% {
+    transform: translate(var(--x1), var(--y1));
+    opacity: 1;
+  }
+  45%,
+  100% {
+    transform: translate(var(--x1), var(--y1));
+    opacity: 0;
+  }
+}
+
+.fb-pair {
+  position: relative;
+  rotate: var(--rot, 0deg);
+  scale: var(--face, 1) 1;
+}
+
+.fb-jet {
+  position: relative;
+  display: block;
+  width: 1em;
+}
+
+.fb-jet .jet img {
+  filter: brightness(0.5) saturate(0.7);
+}
+
+.fb-jet.chaser {
+  position: absolute;
+  right: 230%;
+  top: 70%;
+  scale: 0.9;
+}
+
+.fb-trail {
+  position: absolute;
+  right: 86%;
+  top: 50%;
+  width: 640%;
+  height: max(1.5px, 0.035em);
+  border-radius: 2px;
+  background: linear-gradient(270deg, rgba(255, 236, 214, 0.85), rgba(255, 220, 200, 0.35) 40%, transparent);
+}
+
+.fb1 {
+  --x0: 104vw;
+  --y0: calc(var(--vh) * 0.22);
+  --x1: 56vw;
+  --y1: calc(var(--vh) * -0.14);
+  --rot: 33deg;
+  --face: -1;
+}
+
+.fb2 {
+  --fw: 3.6vmax;
+  --cycle: 31s;
+  --wait: -17s;
+  --x0: -10vw;
+  --y0: calc(var(--vh) * 0.3);
+  --x1: 36vw;
+  --y1: calc(var(--vh) * -0.12);
+  --rot: -38deg;
+}
+
+/* The painted jets on a wide screen fly left, so the air streams to the right. */
+.sc-title .t-clouds,
+.sc-title .sc-speed {
+  --flow: -1;
+}
+
+.sc-title .sc-speed {
+  scale: var(--flow, 1) 1;
+}
+
+.sc-title .streak {
+  --peak: 0.4;
+}
+
+@media (max-aspect-ratio: 1/1) {
+  .key-wide {
+    display: none;
+  }
+
+  .key-tall {
+    display: block;
+  }
+
+  .key-fade {
+    background: linear-gradient(0deg, var(--ink-sky) 22%, rgba(10, 15, 32, 0.8) 38%, transparent 56%);
+  }
+
+  .sc-title .t-clouds,
+  .sc-title .sc-speed {
+    --flow: 1;
+  }
+
+  .t-clouds.far {
+    --size: 44vmin;
+    --band: 0.14;
+  }
+
+  .t-clouds.near {
+    --size: 150vmin;
+    --top: 30%;
+    --band: 0.2;
+    --alpha: 0.7;
+  }
+
+  .fb1 {
+    --x0: -14vw;
+    --y0: calc(var(--vh) * 0.2);
+    --x1: 44vw;
+    --y1: calc(var(--vh) * -0.1);
+    --rot: -33deg;
+    --face: 1;
+  }
+
+  .fb2 {
+    --y0: calc(var(--vh) * 0.09);
+    --x1: 30vw;
+    --y1: calc(var(--vh) * -0.08);
+    --rot: -24deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .key,
+  .key-burn {
+    animation: none;
+  }
+
+  .t-clouds.far .t-cloud {
+    animation: none;
+    transform: translateX(calc(var(--d) * -92vw)) scaleX(var(--mirror, 1));
+  }
+
+  .t-clouds.near,
+  .t-flyby,
+  .sc-title .sc-speed {
+    display: none;
+  }
+}
+
 .title-screen {
   position: relative;
   flex: 1;
   min-height: 100dvh;
   display: flex;
   align-items: center;
-  padding: 6vh clamp(20px, 7vw, 110px);
+  padding: 5vh clamp(22px, 6.5vw, 110px);
   overflow: hidden;
-}
-
-.title-flight {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.title-jet {
-  position: absolute;
-  right: 4%;
-  top: 34%;
-  width: min(52vw, 660px);
-  animation: title-fly 9s ease-in-out infinite alternate;
-}
-
-.title-foe {
-  position: absolute;
-  right: 40%;
-  top: 14%;
-  width: min(16vw, 200px);
-  filter: blur(1.2px) brightness(0.55) saturate(0.7);
-  animation: title-foe 14s ease-in-out infinite alternate;
-}
-
-@keyframes title-fly {
-  from {
-    transform: translate(0, 0) rotate(-2deg);
-  }
-  to {
-    transform: translate(-3vw, -2.5vh) rotate(-4deg);
-  }
-}
-
-@keyframes title-foe {
-  from {
-    transform: translate(0, 0) rotate(3deg);
-  }
-  to {
-    transform: translate(-4vw, 2vh) rotate(1deg);
-  }
 }
 
 .title-copy {
@@ -1079,59 +1361,189 @@ button {
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 26px;
-  max-width: 520px;
-  animation: enter 0.8s ease-out;
+  gap: clamp(18px, 3.6vh, 34px);
+  width: min(460px, 100%);
+}
+
+/* The wordmark: stencil capitals leaning into the wind, cel-shaded gold over an ink outline and a red block shadow. */
+.logo {
+  --lw: clamp(3.3rem, 8.2vw, 6.8rem);
+  position: relative;
+  width: max-content;
+  max-width: 100%;
+  transform: skewX(-9deg) rotate(-2deg);
+  transform-origin: 0 100%;
 }
 
 .logo-kicker {
-  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin: 0 0 0.35em 0.15em;
   font-family: var(--cond);
   font-weight: 700;
-  letter-spacing: 0.32em;
+  font-size: clamp(0.74rem, 1.2vw, 0.95rem);
+  letter-spacing: 0.3em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--brass-hi);
-  font-size: 0.9rem;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 2px 0 #0a0f1c, 0 0 10px rgba(0, 0, 0, 0.8);
+}
+
+.logo-wings {
+  flex: none;
+  width: 2.5em;
+  height: 1.25em;
+  overflow: visible;
 }
 
 .logo-word {
-  display: inline-block;
+  position: relative;
+  isolation: isolate;
   margin: 0;
-  padding-right: 0.12em;
+  padding-right: 0.1em;
   font-family: var(--display);
   font-weight: 400;
-  font-size: clamp(3.2rem, 10vw, 6.6rem);
-  line-height: 0.95;
-  letter-spacing: 0.06em;
-  background: linear-gradient(180deg, #fff8e6 0 17%, #ffd977 17% 55%, #dc9a34 55% 100%);
+  font-size: var(--lw);
+  line-height: 0.92;
+  letter-spacing: 0.035em;
+  white-space: nowrap;
+}
+
+.logo-word::before,
+.logo-word::after {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: -1;
+  -webkit-text-stroke: 0.15em #0a0f1c;
+  color: #0a0f1c;
+}
+
+.logo-word::before {
+  z-index: -2;
+  translate: 0.07em 0.09em;
+  -webkit-text-stroke-color: #d8412a;
+  color: #d8412a;
+  filter: drop-shadow(0.03em 0.04em 0 #0a0f1c) drop-shadow(0 0.12em 0.2em rgba(0, 0, 0, 0.55));
+}
+
+.logo-face {
+  position: relative;
+  background:
+    linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.9) 47% 51%, transparent 56%) 130% 0 / 320% 100% no-repeat,
+    linear-gradient(180deg, #fff7dc 0 30%, #ffd15c 30% 62%, #ee8a2e 62% 100%);
   -webkit-background-clip: text;
   background-clip: text;
+  -webkit-text-fill-color: transparent;
   color: transparent;
-  filter: drop-shadow(2px 0 0 #241503) drop-shadow(-2px 0 0 #241503) drop-shadow(0 2px 0 #241503) drop-shadow(0 -2px 0 #241503) drop-shadow(0 5px 0 #3a2508) drop-shadow(0 10px 18px rgba(0, 0, 0, 0.7));
+  animation: logo-shine 7s ease-in-out 1.6s infinite;
+}
+
+@keyframes logo-shine {
+  0%,
+  72% {
+    background-position: 130% 0, 0 0;
+  }
+  88%,
+  100% {
+    background-position: -40% 0, 0 0;
+  }
 }
 
 .logo-tag {
-  margin: 8px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  margin: 0.3em 0 0 0.25em;
   font-family: var(--cond);
-  font-weight: 600;
+  font-weight: 700;
   font-style: italic;
-  font-size: 1.35rem;
-  letter-spacing: 0.1em;
-  color: #d9e3ea;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+  font-size: clamp(0.9rem, 1.7vw, 1.3rem);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #fff4e0;
 }
 
+.logo-tag span {
+  padding: 0.12em 0.7em 0.14em 0.8em;
+  border: 2px solid #0a0f1c;
+  background: #d8412a;
+  box-shadow: 0.2em 0.22em 0 #0a0f1c;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.logo-tag::after {
+  content: "";
+  flex: 1;
+  min-width: 1.6em;
+  height: 3px;
+  background: linear-gradient(90deg, var(--brass-hi), transparent);
+}
+
+/* Menu: the main actions are pills like End Turn; the small ones are plates like the HUD buttons. */
 .title-menu {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  width: min(320px, 100%);
+  gap: 14px;
+  width: min(350px, 100%);
+}
+
+.title-menu .btn.big {
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 0.3em 1.1em 0.3em 1.5em;
+  border: none;
+  border-radius: 40px;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 1.34rem;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  background: linear-gradient(180deg, #3d4f60, #223040 55%, #18232f);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.2), inset 0 -3px 0 rgba(0, 0, 0, 0.35), 0 0 0 2px var(--brass-lo), 0 0 0 4px #0a0e13, 0 10px 22px rgba(0, 0, 0, 0.55);
+}
+
+.title-menu .btn.big.primary {
+  background: linear-gradient(180deg, #ffd27a, #e3962f 50%, #b9661c);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.5), inset 0 -3px 0 rgba(90, 40, 0, 0.35), 0 0 0 2px #5b3510, 0 0 0 4px #0a0e13, 0 10px 22px rgba(0, 0, 0, 0.55), 0 0 26px rgba(255, 170, 60, 0.25);
+}
+
+.title-menu .go {
+  flex: none;
+  width: 1.5em;
+  height: 1.5em;
+  margin-left: 0.6em;
+  border-radius: 50%;
+  background: rgba(10, 14, 19, 0.22) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 6l6 6-6 6' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 55% 50% / 62% no-repeat;
+  box-shadow: inset 0 0 0 2px rgba(10, 14, 19, 0.35);
+  transition: translate 0.14s ease;
+}
+
+.title-menu .primary .go {
+  background-color: rgba(60, 26, 0, 0.55);
+}
+
+.title-menu .btn.big:hover .go {
+  translate: 3px 0;
 }
 
 .title-row {
   display: flex;
   gap: 10px;
+}
+
+.title-row .btn {
+  min-height: 46px;
+  padding-inline: 0.9em;
+  border: none;
+  border-radius: 9px;
+  white-space: nowrap;
+  background: linear-gradient(180deg, #34444f, #1c2731);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 0 0 1px #0a0e13, 0 0 0 2px rgba(200, 154, 75, 0.45), 0 6px 14px rgba(0, 0, 0, 0.45);
+  color: #e8dcc0;
 }
 
 .title-row .btn:not(.square) {
@@ -1140,7 +1552,91 @@ button {
 
 .title-copy .fine {
   margin: 0;
+  max-width: 34ch;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+}
+
+@media (max-aspect-ratio: 1/1) {
+  .title-screen {
+    align-items: flex-end;
+    justify-content: center;
+    padding: 20px clamp(18px, 6vw, 60px) max(22px, env(safe-area-inset-bottom));
+  }
+
+  .title-copy {
+    gap: clamp(10px, 2.1vh, 20px);
+    width: min(520px, 100%);
+  }
+
+  .title-menu {
+    gap: clamp(9px, 1.7vh, 14px);
+  }
+
+  .title-menu .btn.big {
+    min-height: clamp(46px, 6.9vh, 58px);
+  }
+
+  .logo {
+    --lw: clamp(3rem, 15.5vw, 6rem);
+  }
+
+  .title-menu {
+    width: 100%;
+  }
+}
+
+/* Landscape phones: the two main actions share a row so everything fits the short screen. */
+@media (max-height: 560px) and (min-aspect-ratio: 1/1) {
+  .title-screen {
+    padding: 14px clamp(18px, 4.5vw, 60px);
+  }
+
+  .title-copy {
+    gap: 12px;
+    width: min(430px, 56vw);
+  }
+
+  .logo {
+    --lw: clamp(2.5rem, 15vh, 4.2rem);
+  }
+
+  .title-menu {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 12px;
+    width: 100%;
+  }
+
+  .title-menu .btn.big {
+    min-height: 46px;
+    padding-left: 1.1em;
+    font-size: 1.02rem;
+  }
+
+  .title-menu .btn.big:only-of-type,
+  .title-row {
+    grid-column: 1 / -1;
+  }
+
+  .title-menu .btn.big:not(:only-of-type) {
+    justify-content: center;
+    padding-inline: 0.8em;
+    white-space: nowrap;
+  }
+
+  .title-menu .btn.big:not(:only-of-type) .go {
+    display: none;
+  }
+
+  .title-row .btn {
+    min-height: 40px;
+    font-size: 0.95rem;
+  }
+
+  .title-copy .fine {
+    max-width: none;
+    font-size: 0.72rem;
+  }
 }
 
 /* ------------------------------------------------------------- hangar */
@@ -5360,31 +5856,6 @@ div.loot > span {
 
   .slip-copy p:last-child {
     font-size: 0.88rem;
-  }
-
-  .title-screen {
-    align-items: flex-end;
-    padding: 24px 22px 40px;
-  }
-
-  .title-jet {
-    right: -10%;
-    top: 16%;
-    width: 110vw;
-  }
-
-  .title-foe {
-    right: 52%;
-    top: 7%;
-    width: 34vw;
-  }
-
-  .title-copy {
-    gap: 18px;
-  }
-
-  .title-menu {
-    width: 100%;
   }
 
   .screen-head {

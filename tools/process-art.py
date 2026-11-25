@@ -67,6 +67,31 @@ def key_magenta(img: Image.Image) -> Image.Image:
     return Image.fromarray(out, "RGBA")
 
 
+def key_green(img: Image.Image) -> Image.Image:
+    """Keys a painting on flat green, for warm-toned art that a magenta key would bite into."""
+    rgb = np.asarray(img.convert("RGB")).astype(np.float32)
+    bg = np.median(np.concatenate([rgb[:8].reshape(-1, 3), rgb[-8:].reshape(-1, 3)]), axis=0)
+    dist = np.sqrt(((rgb - bg) ** 2).sum(axis=2))
+    alpha = np.clip((dist - 60.0) / (150.0 - 60.0), 0.0, 1.0)
+    a3 = alpha[..., None]
+    fg = np.clip(np.where(a3 > 0.02, (rgb - (1 - a3) * bg) / np.maximum(a3, 1e-3), rgb), 0, 255)
+    spill = np.clip(fg[..., 1] - np.maximum(fg[..., 0], fg[..., 2]), 0, None)
+    fg[..., 1] -= spill
+    alpha[alpha < 0.06] = 0
+    return Image.fromarray(np.dstack([fg, alpha * 255]).astype(np.uint8), "RGBA")
+
+
+def save_clouds(src: Path):
+    """The title screen's drifting clouds: one sunlit bank and one in shadow, painted one above the other on green."""
+    sheet = Image.open(src / "title_clouds.jpg")
+    half = sheet.height // 2
+    for name, box, width in [("cloud-lit", (0, 0, sheet.width, half), 560), ("cloud-dark", (0, half, sheet.width, sheet.height), 640)]:
+        keyed = key_green(sheet.crop(box))
+        ys, xs = np.where(np.asarray(keyed)[..., 3] > 26)
+        crop = keyed.crop((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
+        resize_rgba(crop, width).save(OUT / "scenes" / f"{name}.webp", "WEBP", quality=78, method=6)
+
+
 def resize_rgba(img: Image.Image, width: int) -> Image.Image:
     height = round(img.height * width / img.width)
     return img.convert("RGBa").resize((width, height), Image.LANCZOS).convert("RGBA")
@@ -196,8 +221,11 @@ def process_chase(src: Path) -> dict:
     return meta
 
 
-def save_rgb(src: Path, name: str, out: str, width: int, quality: int):
+def save_rgb(src: Path, name: str, out: str, width: int, quality: int, keep: float = 1.0):
+    """Saves a painting at `width`. `keep` is the share of its height kept, measured from the top."""
     img = Image.open(src / name).convert("RGB")
+    if keep < 1:
+        img = img.crop((0, 0, img.width, round(img.height * keep)))
     height = round(img.height * width / img.width)
     img = img.resize((width, height), Image.LANCZOS)
     path = OUT / out
@@ -253,6 +281,10 @@ def main():
     for name in ["act1", "act2", "act3"]:
         save_rgb(src, f"fog_{name}.jpg", f"scenes/fog-{name}.webp", 960, 58)
     save_rgb(src, "map_paper.jpg", "scenes/chart.webp", 720, 60)
+    # Title key art. The tall painting repeats its horizon and sun lower down; only the part above that is used.
+    save_rgb(src, "keyart_wide.jpg", "scenes/title-wide.webp", 1280, 72)
+    save_rgb(src, "keyart_tall.jpg", "scenes/title-tall.webp", 720, 72, keep=0.66)
+    save_clouds(src)
     for path in sorted(src.glob("ev_*.jpg")):
         save_rgb(src, path.name, f"events/{path.stem[3:]}.webp", 560, 62)
     for path in sorted(src.glob("art_*.jpg")):

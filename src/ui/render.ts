@@ -168,22 +168,24 @@ function hud(app: AppState): string {
 
 /* ----------------------------------------------------------------- title */
 
+/** Two swept wings meeting at a point: the squadron mark beside the title. No national or unit insignia. */
+const LOGO_WINGS =
+  `<svg class="logo-wings" viewBox="0 0 40 20" aria-hidden="true"><path d="M20 17L2 4h9l9 7 9-7h9Z" fill="#f0cd7d" stroke="#0a0f1c" stroke-width="2" stroke-linejoin="round"/><path d="M20 9l-5-5h10Z" fill="#d8412a" stroke="#0a0f1c" stroke-width="2" stroke-linejoin="round"/></svg>`;
+
 function titleScreen(app: AppState): string {
+  const go = (label: string, act: string, primary: boolean) =>
+    `<button class="btn big ${primary ? "primary" : ""}" data-act="${act}"><span>${label}</span><i class="go" aria-hidden="true"></i></button>`;
   return `
     <section class="title-screen">
-      <div class="title-flight" aria-hidden="true">
-        <div class="title-foe">${jetArt("typhoon", { flip: true })}</div>
-        <div class="title-jet">${jetArt("f16")}</div>
-      </div>
       <div class="title-copy">
         <div class="logo">
-          <p class="logo-kicker">A fighter-jet deck sortie</p>
-          <h1 class="logo-word">DOGFIGHT</h1>
-          <p class="logo-tag">Hold the corridor</p>
+          <p class="logo-kicker">${LOGO_WINGS}<span>A fighter-jet deck sortie</span></p>
+          <h1 class="logo-word" data-text="DOGFIGHT"><span class="logo-face">DOGFIGHT</span></h1>
+          <p class="logo-tag"><span>Hold the corridor</span></p>
         </div>
         <nav class="title-menu">
-          ${app.run ? btn("Continue sortie", "continue", { cls: "primary big" }) : ""}
-          ${btn("New sortie", "hangar", { cls: app.run ? "big" : "primary big" })}
+          ${app.run ? go("Continue sortie", "continue", true) : ""}
+          ${go("New sortie", "hangar", !app.run)}
           <div class="title-row">
             ${btn("Records", "records")}
             ${btn("How to fly", "how")}
