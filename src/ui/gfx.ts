@@ -1,6 +1,6 @@
 /*
  * The effects canvas: one full-viewport 2D canvas that draws every particle and drawn effect
- * (tracers, smoke, rings, beams, shields). Particles are plain pooled objects stepped by a single
+ * (tracers, missiles, smoke, flares, explosions). Particles are plain pooled objects stepped by a single
  * requestAnimationFrame loop that only runs while something is alive, so a busy fight costs no DOM
  * nodes and an idle screen costs nothing.
  */
@@ -180,7 +180,8 @@ export function freezeGfx(ms: number) {
 
 const sprites = new Map<string, HTMLCanvasElement>();
 
-function sprite(kind: "glow" | "smoke", color: string): HTMLCanvasElement {
+/** A cached soft round sprite in one colour, for effects that draw their own glows. */
+export function fxSprite(kind: "glow" | "smoke", color: string): HTMLCanvasElement {
   const key = kind + color;
   let s = sprites.get(key);
   if (s) return s;
@@ -262,7 +263,7 @@ function drawParticles(c: CanvasRenderingContext2D) {
     if (p.kind === "smoke") {
       c.globalAlpha = p.alpha * (k < 0.12 ? k / 0.12 : (1 - k) ** 1.4);
       const s = p.size;
-      c.drawImage(sprite("smoke", p.color), p.x - s, p.y - s, s * 2, s * 2);
+      c.drawImage(fxSprite("smoke", p.color), p.x - s, p.y - s, s * 2, s * 2);
     } else {
       c.globalAlpha = p.alpha * (1 - k * k);
       c.save();
@@ -283,7 +284,7 @@ function drawParticles(c: CanvasRenderingContext2D) {
     c.globalAlpha = a;
     if (p.kind === "glow") {
       const s = p.size;
-      c.drawImage(sprite("glow", p.color), p.x - s, p.y - s, s * 2, s * 2);
+      c.drawImage(fxSprite("glow", p.color), p.x - s, p.y - s, s * 2, s * 2);
     } else if (p.kind === "spark") {
       c.strokeStyle = p.color;
       c.lineWidth = p.size;

@@ -9,7 +9,7 @@ import "./motion.css";
 import { audioDebug, configureAudio, setAmbience, setMusic, sfx, unlockAudio, type Track } from "./audio";
 import { getCard } from "./game/cards";
 import { attackersOf, enemiesTakeLead, splitTurnEvents } from "./game/chase";
-import { setCombatFxSink, type ActionResult, type CombatFx } from "./game/combat";
+import { PLAYER, setCombatFxSink, type ActionResult, type CombatFx } from "./game/combat";
 import { HELP } from "./game/help";
 import { loadMeta, loadRun, saveMeta, saveRun } from "./game/meta";
 import {
@@ -54,6 +54,7 @@ import {
   initFx,
   playEvents,
   pulse,
+  rearmJet,
   setBar,
   setSlowMo,
   setSpeed,
@@ -67,6 +68,7 @@ import {
   type CardSnap,
 } from "./ui/fx";
 import { rectOfSel, reduced } from "./ui/geo";
+import { rearm } from "./ui/loadout";
 import { effectCount, particleCount } from "./ui/gfx";
 import { C } from "./ui/cardfx";
 import { highestUnlocked, ROOKIE } from "./game/difficulty";
@@ -147,8 +149,15 @@ function moveCamera(shot: CamShot): Promise<void> {
   return camera(shot);
 }
 
+/** Whether the last draw was of a fight, to spot a new one starting. */
+let inFight = false;
+
 function draw() {
   if (app.run?.screen !== "combat" && !app.frozen) app.cam = "close";
+  const fighting = !!app.run?.combat;
+  // Every jet goes into a new fight with full pylons.
+  if (fighting && !inFight) rearm();
+  inFight = fighting;
   document.documentElement.dataset.cam = app.cam;
   setScene(sceneKey(app));
   syncAudio();
@@ -309,6 +318,8 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
   setSpeed(1);
   app.armed = null;
   aim(null, null, false);
+  // The enemy start their turn with whatever they fired last time back on the rails.
+  if (opts.turn) for (const enemy of pre.combat!.enemies) rearm(enemy.uid);
   const ended = !run.combat || run.screen !== "combat";
   if (ended) app.frozen = pre;
   after(beforeScreen, beforeNotices);
@@ -380,6 +391,7 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
       for (const uid of pendingDown) root!.querySelector(`.foe[data-who="${uid}"]`)?.classList.add("down");
       if (opts.turn) {
         hand?.classList.remove("stowed");
+        rearmJet(PLAYER);
         void banner(`Turn ${run.combat!.turn}`, "", "short");
         if (reshuffled) shuffleFx();
         flipHand(new Map(), true, reshuffled ? 260 : 0);

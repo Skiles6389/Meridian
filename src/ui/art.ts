@@ -84,7 +84,7 @@ const pct = (n: number) => `${n.toFixed(1)}%`;
 /** A missile seen from dead astern, hanging under its pylon: tail fins in an X around the motor nozzle. */
 function sternStore(kind: StoreKind): string {
   if (kind === "bay") {
-    return `<svg viewBox="0 0 20 30"><g class="door"><path d="M2 0h16l-1 3H3z" fill="#0b0e13"/><path d="M3 2 1 12h3l2-9z" fill="#8f9aa8" stroke="#0d1117" stroke-width="1.2" stroke-linejoin="round"/><path d="M17 2l2 10h-3l-2-9z" fill="#6f7a88" stroke="#0d1117" stroke-width="1.2" stroke-linejoin="round"/></g></svg>`;
+    return `<svg viewBox="0 0 20 30"><g class="door"><path d="M3 0h14l-1.5 4.5h-11z" fill="#07090d"/><path d="M4 1 .5 15h4L7 3z" fill="#b4bdc9" stroke="#0d1117" stroke-width="1.3" stroke-linejoin="round"/><path d="M16 1l3.5 14h-4L13 3z" fill="#8792a1" stroke="#0d1117" stroke-width="1.3" stroke-linejoin="round"/></g></svg>`;
   }
   const pylon = `<path class="pyl" d="M7 0h6l-1.2 9H8.2z" fill="#56606e" stroke="#0d1117" stroke-width="1.3" stroke-linejoin="round"/>`;
   if (kind === "pod") {

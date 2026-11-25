@@ -1,14 +1,17 @@
 /*
- * Draws the card recipes from cardfx.ts: the cast on the player's jet, each shot on its way to a
- * target, and the impact where it lands. Particles and drawn effects go to the canvas in gfx.ts;
- * only the jet's own pose changes (rolls, jinks, cloaks) touch the DOM.
+ * Draws the card recipes from cardfx.ts. Everything starts from a real place on the jet's sprite,
+ * read from the anchor markers the renderer lays over it: tracer leaves the gun's muzzle, a missile
+ * drops off the pylon it was hanging on, flares come out of the dispensers. Particles and drawn
+ * effects go to the canvas in gfx.ts; the jet's own pose and its weapon stations are DOM.
  */
 
 import { sfx } from "../audio";
 import { PLAYER } from "../game/combat";
-import { C, cardAnim, MAX_LEAD, type Impact, type Shot, type Step, type Where } from "./cardfx";
-import { addEffect, emit, flash, glow, ring, shards, smoke, sparks } from "./gfx";
-import { anchor, appRoot, artEl, center, depth, easeBack, easeOut, lerp, livingFoes, midOf, muzzle, nozzles, rectOf, rectOfSel, reduced, rnd, timeScale, wait, type Pt } from "./geo";
+import type { StoreKind } from "./anchors";
+import { cardAnim, MAX_LEAD, type Impact, type Maneuver, type Shot, type Step, type Where } from "./cardfx";
+import { addEffect, emit, flash, fxSprite, glow, shards, smoke, sparks } from "./gfx";
+import { anchor, artEl, center, depth, easeInOut, easeOut, hullPoint, lerp, livingFoes, mark, marks, midOf, muzzle, nozzles, rectOf, reduced, rnd, spriteEl, stations, timeScale, wait, type Pt } from "./geo";
+import { rearm, takeStation } from "./loadout";
 
 type Ctx2 = CanvasRenderingContext2D;
 type StepOf<K extends Step["fx"]> = Extract<Step, { fx: K }>;
@@ -17,6 +20,12 @@ type ShotOf<K extends Shot["fx"]> = Extract<Shot, { fx: K }>;
 interface CastCtx {
   target: number | null;
 }
+
+const TAU = Math.PI * 2;
+const INK = "#0d1117";
+const TRACER = "#ff8a3c";
+const FIRE = "#ffb347";
+const FLAME = "#ff8a3c";
 
 /** Runs `fn` every frame for `life` seconds with the time since the last frame. */
 function tick(life: number, fn: (dt: number, k: number, age: number, c: Ctx2) => void, delay = 0): Promise<void> {
@@ -47,926 +56,561 @@ function targetsOf(on: Where, ctx: CastCtx): number[] {
 /** In and out: rises quickly, holds, and fades over the last part of its life. */
 const pulse = (k: number, rise = 0.18, fall = 0.4) => (k < rise ? k / rise : k > 1 - fall ? (1 - k) / fall : 1);
 
-function line(c: Ctx2, a: Pt, b: Pt, color: string, width: number, alpha = 1) {
-  c.globalAlpha = alpha;
-  c.strokeStyle = color;
-  c.lineWidth = width;
-  c.beginPath();
-  c.moveTo(a.x, a.y);
-  c.lineTo(b.x, b.y);
-  c.stroke();
-}
-
-function jagged(a: Pt, b: Pt, steps: number, sway: number): Pt[] {
-  const pts: Pt[] = [];
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.hypot(dx, dy) || 1;
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const off = i === 0 || i === steps ? 0 : rnd(-1, 1) * sway;
-    pts.push({ x: a.x + dx * t - (dy / len) * off, y: a.y + dy * t + (dx / len) * off });
-  }
-  return pts;
-}
-
-function poly(c: Ctx2, pts: Pt[], color: string, width: number, alpha = 1) {
-  c.globalAlpha = alpha;
-  c.strokeStyle = color;
-  c.lineWidth = width;
-  c.lineJoin = "round";
-  c.beginPath();
-  pts.forEach((p, i) => (i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)));
-  c.stroke();
-}
-
-/** Flickering horizontal bars of interference over a box. */
-function staticBars(r: DOMRect, color: string, bars: number, life: number, delay = 0) {
-  const box = { x: r.left - r.width * 0.08, y: r.top - r.height * 0.15, w: r.width * 1.16, h: r.height * 1.3 };
-  let frame = -1;
-  let cells: number[][] = [];
-  void tick(
-    life,
-    (_dt, k, age, c) => {
-      const f = Math.floor(age / 0.045);
-      if (f !== frame) {
-        frame = f;
-        cells = Array.from({ length: bars }, () => [Math.random(), Math.random(), rnd(0.25, 1), rnd(2, 7), Math.random()]);
-      }
-      c.globalCompositeOperation = "lighter";
-      for (const [fx, fy, fw, h, bright] of cells) {
-        c.globalAlpha = (0.25 + bright * 0.6) * pulse(k, 0.1, 0.35);
-        c.fillStyle = bright > 0.8 ? "#ffffff" : color;
-        const w = box.w * fw;
-        c.fillRect(box.x + (box.w - w) * fx, box.y + box.h * fy, w, h);
-      }
-    },
-    delay,
-  );
-}
-
 function pose(who: number, frames: Keyframe[], ms: number, easing = "cubic-bezier(.3,.7,.3,1)") {
   if (reduced()) return;
   artEl(who)?.animate(frames, { duration: ms * timeScale(), easing });
 }
 
+function shudder(who: number, ms: number, power = 3) {
+  const frames: Keyframe[] = [{ transform: "none" }];
+  for (let i = 0; i < 7; i++) frames.push({ transform: `translate(${rnd(-1, 1) * power}px, ${rnd(-1, 1) * power}px) rotate(${rnd(-0.6, 0.6)}deg)` });
+  frames.push({ transform: "none" });
+  pose(who, frames, ms, "linear");
+}
+
+/** How big an explosion on this airframe should be drawn, from how far away it is. */
+const blastScale = (who: number) => Math.max(0.45, Math.min(1.3, depth(who) * 1.15));
+
+/* ------------------------------------------------------------------ hull */
+
+let scratch: HTMLCanvasElement | null = null;
+
+/**
+ * Paints onto a unit's hull and nowhere else: `paint` draws into a box the size of the sprite, and
+ * the result is clipped to the sprite's own silhouette before it reaches the screen. This is how
+ * armour catches the light, a jet goes dark, or interference crawls over a jammed airframe without
+ * anything spilling into the air around it.
+ */
+function hullFx(who: number, life: number, paint: (c: Ctx2, w: number, h: number, k: number) => void, blend: GlobalCompositeOperation = "lighter", delay = 0): Promise<void> {
+  if (reduced() || typeof document === "undefined") return Promise.resolve();
+  return tick(
+    life,
+    (_dt, k, _age, c) => {
+      const el = spriteEl(who);
+      const img = el?.querySelector("img");
+      if (!el || !img || !img.complete || !img.naturalWidth) return;
+      const r = img.getBoundingClientRect();
+      if (r.width < 8 || r.height < 4) return;
+      scratch ??= document.createElement("canvas");
+      const s = Math.min(1, 360 / r.width);
+      const w = Math.max(2, Math.round(r.width * s));
+      const h = Math.max(2, Math.round(r.height * s));
+      scratch.width = w;
+      scratch.height = h;
+      const o = scratch.getContext("2d")!;
+      paint(o, w, h, k);
+      o.globalAlpha = 1;
+      o.globalCompositeOperation = "destination-in";
+      if (el.classList.contains("flip")) {
+        o.translate(w, 0);
+        o.scale(-1, 1);
+      }
+      o.drawImage(img, 0, 0, w, h);
+      c.globalCompositeOperation = blend;
+      c.drawImage(scratch, r.left, r.top, r.width, r.height);
+    },
+    delay,
+  );
+}
+
+/** A band of reflected light sliding across a hull, in `tint` (six-digit hex). */
+export function hullSheen(who: number, tint: string, life = 0.5, strength = 0.8) {
+  void hullFx(who, life, (o, w, h, k) => {
+    const x = lerp(-0.35, 1.35, easeInOut(k)) * w;
+    const g = o.createLinearGradient(x - w * 0.2, 0, x + w * 0.2, h * 0.5);
+    g.addColorStop(0, tint + "00");
+    g.addColorStop(0.38, tint + "99");
+    g.addColorStop(0.5, "#ffffff");
+    g.addColorStop(0.62, tint + "99");
+    g.addColorStop(1, tint + "00");
+    o.globalAlpha = strength * pulse(k, 0.15, 0.3);
+    o.fillStyle = g;
+    o.fillRect(0, 0, w, h);
+  });
+}
+
+/** Interference crawling over a hull: flickering bars, clipped to the airframe. */
+function hullStatic(who: number, life: number, delay = 0) {
+  let frame = -1;
+  let bars: number[][] = [];
+  void hullFx(
+    who,
+    life,
+    (o, w, h, k) => {
+      const f = Math.floor((k * life) / 0.045);
+      if (f !== frame) {
+        frame = f;
+        bars = Array.from({ length: 7 }, () => [Math.random(), Math.random(), rnd(0.2, 0.9), rnd(0.03, 0.09), Math.random()]);
+      }
+      for (const [fx, fy, fw, fh, bright] of bars) {
+        o.globalAlpha = (0.2 + bright * 0.45) * pulse(k, 0.1, 0.4);
+        o.fillStyle = bright > 0.7 ? "#ffffff" : "#bfe9ff";
+        o.fillRect((1 - fw) * fx * w, fy * h, fw * w, Math.max(1, fh * h));
+      }
+    },
+    "lighter",
+    delay,
+  );
+}
+
+/** Where the last shot at each unit landed, so the impact goes off on the spot the round struck. */
+const landed = new Map<number, { p: Pt; at: number }>();
+
+function setLanding(who: number, p: Pt) {
+  landed.set(who, { p, at: performance.now() });
+}
+
+function landing(who: number, take: boolean): Pt | null {
+  const hit = landed.get(who);
+  if (!hit) return null;
+  if (take) landed.delete(who);
+  return performance.now() - hit.at < 500 * Math.max(1, timeScale()) ? hit.p : null;
+}
+
+/**
+ * A hit turned by armour or a shield: the hull flashes where the round glanced off, and ricochets
+ * skip away back along the line of fire. No bubble, no dome: just metal doing its job.
+ */
+export function deflect(who: number, from: number) {
+  if (reduced()) return;
+  const p = landing(who, false) ?? hullPoint(who, 0.8);
+  const r = spriteEl(who)?.getBoundingClientRect();
+  if (!p || !r || !r.width) return;
+  const k = blastScale(who);
+  const fx = (p.x - r.left) / r.width;
+  const fy = (p.y - r.top) / r.height;
+  void hullFx(who, 0.26, (o, w, h, t) => {
+    const g = o.createRadialGradient(fx * w, fy * h, 0, fx * w, fy * h, w * 0.2);
+    g.addColorStop(0, "#ffffff");
+    g.addColorStop(0.35, "#cfe8ff");
+    g.addColorStop(1, "#cfe8ff00");
+    o.globalAlpha = (1 - t) ** 1.3;
+    o.fillStyle = g;
+    o.fillRect(0, 0, w, h);
+  });
+  const a = center(from);
+  const back = a ? Math.atan2(a.y - p.y, a.x - p.x) : Math.PI / 2;
+  sparks(p.x, p.y, { count: 7, color: "#fff1d0", speed: 300 * k + 80, life: 0.28, size: 1.4, dir: back, spread: 1.1, g: 220 });
+  flash(p.x, p.y, 9 * k + 3, "#ffffff", 0.08);
+}
+
+/* ------------------------------------------------------- weapon stations */
+
+/** Puts fresh rounds on a jet's empty pylons where it stands, and returns the stations it refilled. */
+export function rearmJet(who: number): HTMLElement[] {
+  rearm(who);
+  const empty = stations(who).filter((el) => el.classList.contains("spent"));
+  empty.forEach((el, i) => {
+    el.style.setProperty("--i", String(i));
+    el.classList.remove("spent");
+    el.classList.add("fresh");
+  });
+  return empty;
+}
+
+interface Launch {
+  /** Where the store is on screen. */
+  p: Pt;
+  /** The drawn width of its station, for sizing the weapon as it comes off. */
+  w: number;
+  bay: boolean;
+  /** -1 for the left wing, 1 for the right. */
+  side: number;
+}
+
+/** Takes the next weapon of the wanted kinds off a jet: its pylon is left empty, or its bay door opens. */
+function release(who: number, want: StoreKind[]): Launch | null {
+  const all = stations(who);
+  const index = takeStation(
+    who,
+    all.map((el) => el.dataset.kind as StoreKind),
+    want,
+  );
+  const el = all[index];
+  const mid = center(who);
+  if (!el) {
+    const p = muzzle(who);
+    return p ? { p, w: 16 * depth(who), bay: false, side: Math.random() < 0.5 ? -1 : 1 } : null;
+  }
+  const r = el.getBoundingClientRect();
+  const kind = el.dataset.kind;
+  const bay = kind === "bay";
+  if (bay) {
+    el.classList.add("open");
+    later(720, () => el.classList.remove("open"));
+  } else if (kind !== "pod") el.classList.add("spent");
+  el.classList.remove("fresh");
+  const tip = el.classList.contains("store-tip");
+  const p = { x: r.left + r.width / 2, y: r.top + r.height * (bay ? 0.25 : tip ? 0.5 : 0.62) };
+  return { p, w: r.width, bay, side: mid && p.x < mid.x ? -1 : 1 };
+}
+
 /* ----------------------------------------------------------------- casts */
+
+const POSES: Record<Maneuver, (dir: number, w: number) => Keyframe[]> = {
+  roll: (d) => [{ rotate: "0deg" }, { rotate: `${d * 360}deg` }],
+  jink: (d, w) => [
+    { transform: "none" },
+    { transform: `translate(${d * w * 0.3}px, -8px) rotate(${d * 30}deg)`, offset: 0.35 },
+    { transform: `translate(${d * w * 0.06}px, 0) rotate(${d * -6}deg)`, offset: 0.8 },
+    { transform: "none" },
+  ],
+  loop: (_d, w) => [
+    { transform: "none" },
+    { transform: `translate(0, ${-w * 0.16}px) scale(0.8) rotate(-6deg)`, offset: 0.4 },
+    { transform: `translate(0, ${-w * 0.05}px) scale(0.92) rotate(5deg)`, offset: 0.75 },
+    { transform: "none" },
+  ],
+  dip: (_d, w) => [
+    { transform: "none" },
+    { transform: `translate(0, ${w * 0.07}px) scale(1.05) rotate(-3deg)`, offset: 0.4 },
+    { transform: `translate(0, ${w * 0.03}px) rotate(2deg)`, offset: 0.75 },
+    { transform: "none" },
+  ],
+  wiggle: () => [{ rotate: "0deg" }, { rotate: "14deg", offset: 0.25 }, { rotate: "-12deg", offset: 0.6 }, { rotate: "0deg" }],
+  bank: (d, w) => [
+    { transform: "none" },
+    { transform: `translate(${d * w * 0.08}px, 0) rotate(${d * 24}deg)`, offset: 0.35 },
+    { transform: `translate(${d * w * 0.08}px, 0) rotate(${d * 24}deg)`, offset: 0.65 },
+    { transform: "none" },
+  ],
+  shudder: () => [],
+};
+
+/** Vapour streaming off the wingtips while the jet pulls. */
+function tipVapour(who: number, ms: number) {
+  const k = Math.max(0.5, depth(who));
+  let since = 1;
+  void tick(ms / 1000, (dt, t) => {
+    since += dt;
+    if (since < 0.022 || t < 0.08 || t > 0.9) return;
+    since = 0;
+    for (const p of marks(who, "tip")) smoke(p.x, p.y, 7 * k, "#ffffff", 0.42, { alpha: 0.3, vx: 0, vy: 26 * k, grow: 16 * k });
+  });
+}
+
+/** The points a jamming signal leaves from: the pods, or the radome on a jet that carries none. */
+function emitters(who: number): Pt[] {
+  const pods = marks(who, "pod");
+  if (pods.length) return pods;
+  const nose = mark(who, "nose") ?? muzzle(who);
+  return nose ? [nose] : [];
+}
+
+/** A faint ripple in the air from `o` towards `b`: the only sign of a jamming signal on its way. */
+function shimmer(o: Pt, b: Pt, life: number, delay: number, waves: number) {
+  const dir = Math.atan2(b.y - o.y, b.x - o.x);
+  const dist = Math.hypot(b.x - o.x, b.y - o.y);
+  void addEffect({
+    life,
+    delay,
+    draw: (c, k) => {
+      c.globalCompositeOperation = "lighter";
+      c.lineWidth = 1.1;
+      for (let j = 0; j < waves; j++) {
+        const t = k * 1.3 - j * 0.11;
+        if (t <= 0.02 || t >= 1) continue;
+        c.globalAlpha = 0.3 * Math.sin(Math.PI * t);
+        c.strokeStyle = j % 2 ? "#d8c8ff" : "#bfe9ff";
+        c.beginPath();
+        c.arc(o.x, o.y, dist * t, dir - 0.15, dir + 0.15);
+        c.stroke();
+      }
+    },
+  });
+}
 
 const STEPS: { [K in Step["fx"]]: (s: StepOf<K>, ctx: CastCtx) => void } = {
   flares(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
     const k = Math.max(0.6, depth(PLAYER));
-    const life = s.fall ? 1.0 : 0.72;
-    const pts = Array.from({ length: s.count }, (_, i) => {
-      const t = s.count > 1 ? i / (s.count - 1) - 0.5 : 0;
-      // Thrown up and out to both sides, then arcing over and falling away behind the jet.
-      const ang = ((-90 + t * s.spread * 1.7) * Math.PI) / 180;
-      const v = rnd(560, 760) * k;
-      return {
-        x: r.left + r.width * (0.5 + t * 0.34),
-        y: r.top + r.height * 0.55,
-        vx: Math.cos(ang) * v * 1.2,
-        vy: Math.sin(ang) * v * (s.fall ? 0.3 : 0.62),
-        smoke: 0,
-        delay: Math.abs(t) * (s.fall ? 0.18 : 0.08),
-      };
-    });
-    flash(r.left + r.width / 2, r.top + r.height * 0.6, 40 * k, s.color);
-    void tick(life, (dt, kk, age) => {
-      for (const p of pts) {
-        if (age < p.delay) continue;
-        const d = 0.08 ** dt;
-        p.vx *= d;
-        p.vy = p.vy * d + (s.fall ? 620 : 420) * k * dt;
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        const fade = 1 - kk ** 2;
-        emit({ kind: "glow", x: p.x, y: p.y, size: (17 + Math.random() * 9) * k * fade + 2, color: s.color, life: 0.08, alpha: 0.95 });
-        emit({ kind: "glow", x: p.x, y: p.y, size: 6 * k * fade + 1, color: "#ffffff", life: 0.06 });
-        p.smoke += dt;
-        if (p.smoke > 0.03) {
-          p.smoke = 0;
-          smoke(p.x, p.y, 13 * k, "#e8dccb", 0.55, { alpha: 0.32 });
-          if (Math.random() < 0.5) emit({ kind: "spark", x: p.x, y: p.y, vx: rnd(-40, 40), vy: rnd(20, 90), g: 300, life: 0.3, size: 1.4, color: s.color });
+    const mid = center(PLAYER);
+    if (!mid) return;
+    const list = Array.from({ length: s.count }, (_, i) => ({
+      port: i,
+      delay: s.salvo ? Math.floor(i / 2) * 0.04 : i * 0.085,
+      x: 0,
+      y: 0,
+      vx: rnd(150, 300) * k,
+      vy: rnd(30, 120) * k,
+      age: 0,
+      life: rnd(0.85, 1.2),
+      size: rnd(5.5, 8) * k,
+      lit: false,
+    }));
+    const longest = Math.max(...list.map((f) => f.delay + f.life));
+    void tick(longest, (dt, _k, age, c) => {
+      for (const f of list) {
+        if (age < f.delay) continue;
+        if (!f.lit) {
+          // Each flare leaves the dispenser where the jet is at that moment.
+          const ports = marks(PLAYER, "flare");
+          const p = ports.length ? ports[f.port % ports.length] : anchor(PLAYER, f.port % 2 ? 0.6 : 0.4, 0.85);
+          if (!p) continue;
+          f.x = p.x;
+          f.y = p.y;
+          f.vx *= p.x < mid.x ? -1 : 1;
+          f.lit = true;
+          flash(p.x, p.y, 7 * k, "#fff1c4", 0.06);
         }
+        f.age += dt;
+        if (f.age >= f.life) continue;
+        f.vy += 430 * k * dt;
+        f.vx *= 0.3 ** dt;
+        f.x += f.vx * dt;
+        f.y += f.vy * dt;
+        const t = f.age / f.life;
+        // It falls behind towards the camera, so it swells as it burns out.
+        const r = f.size * (1 + t * 1.5) * rnd(0.85, 1.15);
+        c.globalCompositeOperation = "lighter";
+        c.globalAlpha = (1 - t) ** 0.7;
+        c.drawImage(fxSprite("glow", "#ffe2a0"), f.x - r * 2.4, f.y - r * 2.4, r * 4.8, r * 4.8);
+        c.drawImage(fxSprite("glow", "#ffffff"), f.x - r, f.y - r, r * 2, r * 2);
+        if (Math.random() < 0.75) smoke(f.x, f.y, r * 1.2, "#efe9df", 0.7, { alpha: 0.26, vx: 0, vy: -8, grow: r * 2.2 });
+        if (Math.random() < 0.22) emit({ kind: "spark", x: f.x, y: f.y, vx: rnd(-50, 50), vy: rnd(20, 120), g: 300, life: 0.3, size: 1.2, color: "#ffe2a0" });
       }
     });
   },
 
   chaff(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    const o = { x: r.left + r.width / 2, y: r.top + r.height * 0.62 };
-    const reach = r.width * s.radius;
-    flash(o.x, o.y, 28, s.color, 0.12);
-    for (let i = 0; i < s.count; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const v = reach * rnd(0.6, 2.6);
-      emit({
-        kind: "dot",
-        x: o.x + rnd(-8, 8),
-        y: o.y + rnd(-4, 4),
-        vx: Math.cos(a) * v,
-        vy: Math.sin(a) * v * 0.55,
-        g: 30,
-        drag: 0.03,
-        life: rnd(0.6, 1.15),
-        size: rnd(1.4, 3.2),
-        color: Math.random() < 0.3 ? "#ffffff" : s.color,
-        flicker: 0.85,
-        delay: Math.random() * 0.08,
+    const k = Math.max(0.6, depth(PLAYER));
+    for (let b = 0; b < s.bursts; b++) {
+      later(b * 120, () => {
+        const p = mark(PLAYER, "chaff") ?? anchor(PLAYER, 0.5, 0.9);
+        if (!p) return;
+        const side = b % 2 ? 1 : -1;
+        const n = Math.round(30 * s.size);
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * TAU;
+          const v = rnd(30, 190) * k * s.size;
+          // Strips of foil tumbling in the airflow: each one glints as it turns.
+          emit({ kind: "dot", x: p.x, y: p.y, vx: Math.cos(a) * v + side * 40 * k, vy: Math.sin(a) * v * 0.7 + 90 * k, g: 40, drag: 0.06, life: rnd(0.7, 1.5), size: rnd(1, 2.2), color: i % 3 ? "#eaf4ff" : "#ffffff", flicker: 0.92 });
+        }
+        for (let i = 0; i < 3; i++) smoke(p.x + rnd(-8, 8) * k, p.y + rnd(0, 10) * k, 22 * k * s.size, "#dfe6ee", 1, { alpha: 0.16, vx: side * 20 * k, vy: 60 * k, grow: 60 * k * s.size });
       });
     }
-    for (let i = 0; i < 5; i++) smoke(o.x + rnd(-reach, reach) * 0.3, o.y + rnd(-10, 10), reach * 0.34, s.color, 0.8, { alpha: 0.16 });
   },
 
-  dome(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height * 0.52;
-    const rx = r.width * 0.6;
-    const ry = Math.max(r.height * 0.86, r.width * 0.3);
-    const cell = Math.max(12, r.width * 0.075);
-    void addEffect({
-      life: 0.72,
-      draw: (c, k, age) => {
-        const grow = k < 0.3 ? easeBack(k / 0.3) : 1;
-        const a = pulse(k, 0.12, 0.45);
-        c.globalCompositeOperation = "lighter";
-        c.translate(cx, cy);
-        c.scale(grow, grow);
-        const fill = c.createRadialGradient(0, -ry * 0.3, ry * 0.1, 0, 0, rx);
-        fill.addColorStop(0, s.color + "00");
-        fill.addColorStop(0.75, s.color + "22");
-        fill.addColorStop(1, s.color + "66");
-        c.globalAlpha = a;
-        c.fillStyle = fill;
-        c.beginPath();
-        c.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-        c.fill();
-        if (s.hex) {
-          c.save();
-          c.clip();
-          c.strokeStyle = s.color;
-          c.lineWidth = 1.2;
-          const hgt = cell * 0.866;
-          for (let row = -Math.ceil(ry / hgt); row <= Math.ceil(ry / hgt); row++) {
-            for (let col = -Math.ceil(rx / (cell * 1.5)); col <= Math.ceil(rx / (cell * 1.5)); col++) {
-              const hx = col * cell * 1.5;
-              const hy = row * hgt * 2 + (col & 1 ? hgt : 0);
-              const dist = Math.hypot(hx / rx, hy / ry);
-              if (dist > 1.05) continue;
-              const wave = Math.max(0, 1 - Math.abs(dist - age * 2.2) * 3.2);
-              c.globalAlpha = a * (0.12 + dist * 0.25 + wave * 0.75);
-              c.beginPath();
-              for (let i = 0; i < 6; i++) {
-                const ang = (Math.PI / 3) * i;
-                const px = hx + Math.cos(ang) * cell * 0.5;
-                const py = hy + Math.sin(ang) * cell * 0.5;
-                if (i) c.lineTo(px, py);
-                else c.moveTo(px, py);
-              }
-              c.closePath();
-              c.stroke();
-            }
-          }
-          c.restore();
-        }
-        for (let i = 0; i < s.rings; i++) {
-          const rk = (age * 1.6 + i / s.rings) % 1;
-          c.globalAlpha = a * (i === 0 ? 1 : 1 - rk);
-          c.strokeStyle = i === 0 ? "#ffffff" : s.color;
-          c.lineWidth = i === 0 ? 2.2 : 1.6;
-          const m = i === 0 ? 1 : 1 + rk * 0.22;
-          c.beginPath();
-          c.ellipse(0, 0, rx * m, ry * m, 0, 0, Math.PI * 2);
-          c.stroke();
-        }
-        // A bright glint that runs round the rim.
-        const ga = age * 7;
-        c.globalAlpha = a;
-        c.drawImage(glintSprite(s.color), Math.cos(ga) * rx - 14, Math.sin(ga) * ry - 14, 28, 28);
-      },
-    });
-  },
-
-  plates(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height * 0.52;
-    const rx = r.width * 0.44;
-    const ry = Math.max(r.height * 0.62, r.width * 0.2);
-    const w = Math.max(18, r.width * 0.17);
-    const h = w * 0.5;
-    const slots = Array.from({ length: s.count }, (_, i) => {
-      const ang = -Math.PI / 2 + ((i + 0.5) / s.count) * Math.PI * 2;
-      return { ang, x: Math.cos(ang) * rx, y: Math.sin(ang) * ry, at: i * 0.045, hit: false };
-    });
-    void addEffect({
-      life: 0.5 + s.count * 0.045 + 0.3,
-      draw: (c, k, age) => {
-        const fade = k > 0.75 ? (1 - k) / 0.25 : 1;
-        c.translate(cx, cy);
-        for (const p of slots) {
-          const t = Math.min(1, Math.max(0, (age - p.at) / 0.2));
-          if (t <= 0) continue;
-          const far = 1 + (1 - t ** 2.4) * 1.6;
-          const x = p.x * far;
-          const y = p.y * far;
-          if (t >= 1 && !p.hit) {
-            p.hit = true;
-            flash(cx + p.x, cy + p.y, w * 0.55, "#ffffff", 0.1);
-            sparks(cx + p.x, cy + p.y, { count: 4, color: C.brass, speed: 190, life: 0.25, size: 1.4 });
-          }
-          c.save();
-          c.translate(x, y);
-          c.rotate(p.ang + Math.PI / 2 + (1 - t) * 0.9);
-          const settle = t >= 1 ? 1 + Math.max(0, 0.18 - (age - p.at - 0.2)) * 0.9 : 1;
-          c.scale(settle, settle);
-          c.globalAlpha = fade * Math.min(1, t * 3);
-          const g = c.createLinearGradient(0, -h / 2, 0, h / 2);
-          g.addColorStop(0, "#ffffff");
-          g.addColorStop(0.18, s.color);
-          g.addColorStop(1, "#3a4350");
-          c.fillStyle = g;
-          c.beginPath();
-          c.moveTo(-w / 2 + 3, -h / 2);
-          c.lineTo(w / 2 - 3, -h / 2);
-          c.lineTo(w / 2, h / 2);
-          c.lineTo(-w / 2, h / 2);
-          c.closePath();
-          c.fill();
-          c.strokeStyle = "#0c1218";
-          c.lineWidth = 1.2;
-          c.stroke();
-          c.fillStyle = "#101820";
-          c.fillRect(-w / 2 + 4, 0, 2, 2);
-          c.fillRect(w / 2 - 6, 0, 2, 2);
-          c.restore();
-        }
-      },
-    });
-  },
-
-  roll(s) {
-    const dir = Math.random() < 0.5 ? -1 : 1;
-    pose(PLAYER, [{ rotate: "0deg" }, { rotate: `${dir * 360 * s.turns}deg` }], s.ms, "cubic-bezier(.45,.05,.3,1)");
-  },
-
-  jink(s) {
-    const r = rectOf(PLAYER);
-    const far = (r?.width ?? 200) * 0.3 * s.dir;
-    pose(PLAYER, [{ transform: "none" }, { transform: `translate(${far}px, -4%) rotate(${s.dir * 32}deg)`, offset: 0.4 }, { transform: `translate(${far * 0.5}px, 0) rotate(${s.dir * -8}deg)`, offset: 0.75 }, { transform: "none" }], 460);
-  },
-
-  loop(s) {
-    pose(
-      PLAYER,
-      [
-        { transform: "translateY(0) scale(1) rotate(0deg)" },
-        { transform: "translateY(-26%) scale(.84) rotate(0deg)", offset: 0.34 },
-        { transform: "translateY(-34%) scale(.78) rotate(180deg)", offset: 0.62 },
-        { transform: "translateY(-10%) scale(.94) rotate(360deg)", offset: 0.86 },
-        { transform: "translateY(0) scale(1) rotate(360deg)" },
-      ],
-      s.ms,
-      "cubic-bezier(.4,.1,.3,1)",
-    );
-  },
-
-  dip(s) {
-    pose(PLAYER, [{ transform: "none" }, { transform: "translateY(16%) scale(1.07) rotate(-3deg)", offset: 0.4 }, { transform: "translateY(12%) scale(1.05) rotate(2deg)", offset: 0.65 }, { transform: "none" }], s.ms);
-  },
-
-  cloak(s) {
-    const r = rectOf(PLAYER);
-    const img = artEl(PLAYER)?.querySelector<HTMLElement>(".cj img");
-    if (!r || !img) return;
-    if (!reduced()) {
-      img.animate([{ opacity: 1 }, { opacity: 0.16, offset: 0.25 }, { opacity: 0.22, offset: 0.7 }, { opacity: 1 }], { duration: s.ms * timeScale(), easing: "ease-in-out" });
+  jam(s, ctx) {
+    const from = emitters(PLAYER);
+    if (!from.length) return;
+    const mid = center(PLAYER);
+    if (s.on === "self") {
+      // Barrage jamming: the pods radiate out to both sides.
+      for (const o of from) {
+        const dir = mid && o.x < mid.x ? -1 : 1;
+        shimmer(o, { x: o.x + dir * 190, y: o.y - 150 }, 0.6, 0, s.power + 1);
+      }
+      return;
     }
-    const life = s.ms / 1000;
-    void tick(life, (_dt, k, age, c) => {
-      // A shimmer line sweeps across the fading airframe.
-      c.globalCompositeOperation = "lighter";
-      const x = r.left + r.width * ((age * 1.8) % 1);
-      const g = c.createLinearGradient(x - 26, 0, x + 26, 0);
-      g.addColorStop(0, s.color + "00");
-      g.addColorStop(0.5, s.color + "aa");
-      g.addColorStop(1, s.color + "00");
-      c.globalAlpha = pulse(k, 0.2, 0.4) * 0.8;
-      c.fillStyle = g;
-      c.fillRect(x - 26, r.top + r.height * 0.1, 52, r.height * 0.8);
-    });
-    for (let i = 0; i < 14; i++) {
-      emit({ kind: "dot", x: r.left + Math.random() * r.width, y: r.top + r.height * rnd(0.2, 0.8), vy: rnd(-50, -15), life: rnd(0.3, life), size: rnd(1.2, 2.6), color: s.color, flicker: 0.7, delay: Math.random() * life * 0.5 });
+    for (const who of targetsOf(s.on, ctx)) {
+      const b = center(who);
+      if (!b) continue;
+      from.forEach((o, i) => shimmer(o, b, 0.55, i * 0.05, s.power + 1));
+      hullStatic(who, 0.22 + s.power * 0.08, 0.3);
     }
   },
 
-  afterimage(s) {
-    const art = artEl(PLAYER);
-    const src = art?.querySelector<HTMLElement>(".cj");
-    if (!art || !src || reduced()) return;
-    for (let i = 0; i < s.count; i++) {
-      const ghost = src.cloneNode(true) as HTMLElement;
-      ghost.classList.add("cj-ghost");
-      ghost.style.setProperty("--tint", s.color);
-      art.appendChild(ghost);
-      const dir = i % 2 ? 1 : -1;
-      const far = (20 + Math.floor(i / 2) * 14) * dir;
-      const anim = ghost.animate(
-        [
-          { translate: "0 0", opacity: 0.7 },
-          { translate: `${far}% ${-4 - i * 2}%`, opacity: 0.45, offset: 0.45 },
-          { translate: `${far * 1.25}% 0`, opacity: 0 },
-        ],
-        { duration: (420 + i * 60) * timeScale(), easing: "cubic-bezier(.2,.7,.3,1)", fill: "forwards" },
-      );
-      anim.finished.catch(() => undefined).then(() => ghost.remove());
+  armor(s) {
+    const k = Math.max(0.6, depth(PLAYER));
+    hullSheen(PLAYER, s.tint, 0.58, 0.85);
+    for (let i = 0; i < s.rivets; i++) {
+      later(120 + i * 38, () => {
+        const p = hullPoint(PLAYER, 1.5);
+        if (!p) return;
+        emit({ kind: "glow", x: p.x, y: p.y, size: 4.5 * k, color: s.tint, life: 0.24, flicker: 0.3 });
+        emit({ kind: "dot", x: p.x, y: p.y, size: 2, color: "#ffffff", life: 0.2 });
+      });
     }
+  },
+
+  pose(s) {
+    if (s.move === "shudder") {
+      shudder(PLAYER, s.ms, 4);
+      return;
+    }
+    const w = rectOf(PLAYER)?.width ?? 300;
+    const dir = s.dir ?? (Math.random() < 0.5 ? -1 : 1);
+    pose(PLAYER, POSES[s.move](dir, w), s.ms, s.move === "roll" ? "cubic-bezier(.45,.05,.35,1)" : "cubic-bezier(.3,.7,.3,1)");
+    if (s.move !== "dip") tipVapour(PLAYER, s.ms);
   },
 
   burner(s) {
-    const r = rectOf(PLAYER);
-    const pts = nozzles(PLAYER);
-    if (!r || !pts.length) return;
-    const base = r.width * 0.07 * s.len;
-    for (const p of pts) {
-      flash(p.x, p.y, base * 2.2, s.color, 0.18);
-      void ring(p.x, p.y, base * 0.4, base * 3.4, s.color, 0.32, 2.5);
+    const lit = s.power >= 1;
+    const k = Math.max(0.6, depth(PLAYER));
+    const to = { scale: String(lit ? 1 + 0.4 * s.power : s.power), opacity: lit ? 1 : 0.55 };
+    for (const g of artEl(PLAYER)?.querySelectorAll<HTMLElement>(".cj-glow") ?? []) {
+      g.animate([{ scale: "1", opacity: 1 }, { ...to, offset: 0.25 }, { ...to, offset: 0.75 }, { scale: "1", opacity: 1 }], { duration: s.ms * timeScale(), easing: "ease-in-out" });
     }
-    pose(PLAYER, [{ transform: "none" }, { transform: `translateY(${-3 * s.len}%) scale(${1 - 0.03 * s.len})`, offset: 0.3 }, { transform: "none" }], s.ms, "cubic-bezier(.2,.8,.3,1)");
-    void tick(s.ms / 1000, (_dt, k) => {
-      const power = pulse(k, 0.12, 0.5);
-      for (const p of pts) {
-        emit({ kind: "glow", x: p.x + rnd(-1, 1), y: p.y + rnd(0, base * 0.3), size: base * (1.3 + Math.random() * 0.7) * power + 2, color: s.color, life: 0.08 });
-        if (Math.random() < 0.7) {
-          emit({ kind: "spark", x: p.x + rnd(-base, base) * 0.3, y: p.y, vx: rnd(-30, 30), vy: rnd(160, 380) * s.len, life: 0.26, size: 1.8, color: s.color, stretch: 0.05, g: 0 });
-        }
+    if (!lit) return;
+    pose(PLAYER, [{ transform: "none" }, { transform: "translate(0, -2.5%) scale(0.97)", offset: 0.4 }, { transform: "none" }], s.ms, "ease-in-out");
+    void tick(s.ms / 1000, (_dt, t, _age, c) => {
+      c.globalCompositeOperation = "lighter";
+      for (const p of nozzles(PLAYER)) {
+        // The plume points at the camera, so it reads as a hot disc that swells and a wash of heat.
+        const r = (14 + 12 * s.power) * k * pulse(t, 0.2, 0.3) * rnd(0.9, 1.1);
+        c.globalAlpha = 0.75 * pulse(t, 0.2, 0.3);
+        c.drawImage(fxSprite("glow", "#ffb060"), p.x - r, p.y - r * 0.8, r * 2, r * 2.5);
+        if (Math.random() < 0.45) smoke(p.x, p.y + r * 0.4, 9 * k, "#ffd9b8", 0.4, { alpha: 0.1, vx: rnd(-10, 10), vy: 130 * k, grow: 46 * k });
       }
     });
-  },
-
-  vapor(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    for (const side of [-1, 1]) {
-      const tip = { x: r.left + r.width * (0.5 + side * 0.44), y: r.top + r.height * 0.56 };
-      for (let i = 0; i < 9; i++) {
-        smoke(tip.x - side * i * r.width * 0.012, tip.y + i * 2, r.width * 0.05, s.color, 0.5, { vx: side * rnd(20, 70), vy: rnd(30, 120), alpha: 0.5, delay: i * 0.018 });
-      }
-      emit({ kind: "spark", x: tip.x, y: tip.y, vx: side * 60, vy: 260, life: 0.3, size: 2, color: s.color, stretch: 0.12, g: 0 });
-    }
   },
 
   vent(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    for (let i = 0; i < s.count; i++) {
-      emit({
-        kind: "glow",
-        x: r.left + r.width * rnd(0.25, 0.75),
-        y: r.top + r.height * rnd(0.35, 0.7),
-        vx: rnd(-60, 60),
-        vy: rnd(-150, -50),
-        g: -90,
-        drag: 0.4,
-        life: rnd(0.5, 0.95),
-        size: rnd(3, 7),
-        color: s.color,
-        flicker: 0.5,
-        delay: Math.random() * 0.2,
-      });
-    }
-    for (let i = 0; i < 4; i++) smoke(r.left + r.width * rnd(0.35, 0.65), r.top + r.height * 0.5, r.width * 0.1, "#3c3f48", 0.8, { vy: -60, alpha: 0.35 });
+    const k = Math.max(0.6, depth(PLAYER));
+    const p = mark(PLAYER, "chaff") ?? anchor(PLAYER, 0.5, 0.9);
+    if (!p) return;
+    for (let i = 0; i < s.puffs; i++) smoke(p.x + rnd(-14, 14) * k, p.y + rnd(-4, 6) * k, 13 * k, s.tint, 0.85, { alpha: 0.3, vx: rnd(-18, 18), vy: rnd(50, 100) * k, grow: 44 * k, delay: i * 0.045 });
   },
 
-  ping(s, ctx) {
-    const from = center(PLAYER);
-    if (!from) return;
-    const jet = rectOf(PLAYER)!;
-    if (s.on === "self") {
-      for (let i = 0; i < s.rings; i++) void ring(from.x, from.y, jet.width * 0.2, jet.width * 1.5, s.color, 0.6, 3, i * 0.11);
-      return;
-    }
-    void ring(from.x, from.y, jet.width * 0.12, jet.width * 0.5, s.color, 0.28, 2.5);
-    for (const uid of targetsOf(s.on, ctx)) {
-      const to = center(uid);
-      const tr = rectOf(uid);
-      if (!to || !tr) continue;
-      const size = Math.max(tr.width, tr.height) * 0.75;
-      // The pulse runs out to the contact as an arc, then rings it.
-      void addEffect({
-        life: 0.2,
-        draw: (c, k) => {
-          const x = lerp(from.x, to.x, k);
-          const y = lerp(from.y, to.y, k);
-          const ang = Math.atan2(to.y - from.y, to.x - from.x);
-          c.globalCompositeOperation = "lighter";
-          c.globalAlpha = 0.9;
-          c.strokeStyle = s.color;
-          c.lineWidth = 3;
-          c.beginPath();
-          c.arc(x, y, lerp(30, 14, k), ang - 0.9, ang + 0.9);
-          c.stroke();
-        },
-      });
-      for (let i = 0; i < s.rings; i++) {
-        if (s.inward) void ring(to.x, to.y, size * 1.9, size * 0.3, s.color, 0.42, 2.5, 0.16 + i * 0.1);
-        else void ring(to.x, to.y, size * 0.2, size * 1.3, s.color, 0.5, 2.5, 0.18 + i * 0.12);
-      }
-      later(190, () => glow(to.x, to.y, size * 0.5, s.color, 0.3, 0, 0.6));
-    }
-  },
-
-  sweep(s) {
-    const o = anchor(PLAYER, 0.5, 0.3);
-    if (!o) return;
-    const foes = livingFoes().map((uid) => center(uid)).filter((p): p is Pt => !!p);
-    const reach = Math.max(180, ...foes.map((p) => Math.hypot(p.x - o.x, p.y - o.y) + 40));
-    const arc = (s.arc * Math.PI) / 180;
-    const start = -Math.PI / 2 - arc / 2;
-    void addEffect({
-      life: 0.6,
-      draw: (c, k) => {
-        const lead = start + arc * easeOut(k);
-        const tail = Math.max(start, lead - 0.9);
-        c.globalCompositeOperation = "lighter";
-        const g = c.createRadialGradient(o.x, o.y, 8, o.x, o.y, reach);
-        g.addColorStop(0, s.color + "55");
-        g.addColorStop(1, s.color + "00");
-        c.globalAlpha = pulse(k, 0.1, 0.3);
-        c.fillStyle = g;
-        c.beginPath();
-        c.moveTo(o.x, o.y);
-        c.arc(o.x, o.y, reach, tail, lead);
-        c.closePath();
-        c.fill();
-        line(c, o, { x: o.x + Math.cos(lead) * reach, y: o.y + Math.sin(lead) * reach }, s.color, 2, pulse(k, 0.1, 0.3));
+  dim(s) {
+    void hullFx(
+      PLAYER,
+      s.ms / 1000,
+      (o, w, h, k) => {
+        o.globalAlpha = 0.62 * pulse(k, 0.25, 0.35);
+        o.fillStyle = "#04070d";
+        o.fillRect(0, 0, w, h);
       },
-    });
-    foes.forEach((p, i) => void ring(p.x, p.y, 4, 30, s.color, 0.4, 2.5, 0.22 + i * 0.08));
+      "source-over",
+    );
+    for (const g of artEl(PLAYER)?.querySelectorAll<HTMLElement>(".cj-glow") ?? []) {
+      g.animate([{ opacity: 1 }, { opacity: 0.2, offset: 0.25 }, { opacity: 0.2, offset: 0.7 }, { opacity: 1 }], { duration: s.ms * timeScale(), easing: "ease-in-out" });
+    }
   },
 
-  lock(s, ctx) {
-    targetsOf(s.on, ctx).forEach((uid, i) => {
-      const r = rectOf(uid);
-      if (!r) return;
-      const p = midOf(r);
-      const size = Math.max(26, Math.max(r.width * 0.5, r.height * 0.75));
-      void addEffect({
-        life: 0.52,
-        delay: i * 0.07,
-        draw: (c, k) => {
-          const t = Math.min(1, k / 0.42);
-          const m = lerp(2.3, 1, easeOut(t));
-          const blink = k > 0.42 && Math.floor((k - 0.42) / 0.1) % 2 === 1 ? 0.35 : 1;
-          c.globalCompositeOperation = "lighter";
-          c.translate(p.x, p.y);
-          c.strokeStyle = s.color;
-          c.lineWidth = 2.4;
-          c.globalAlpha = Math.min(1, t * 2.5) * blink * (k > 0.85 ? (1 - k) / 0.15 : 1);
-          const half = size * m;
-          if (s.shape === "circle") {
-            c.rotate((1 - t) * 2.2);
-            for (let q = 0; q < 4; q++) {
-              c.beginPath();
-              c.arc(0, 0, half, q * (Math.PI / 2) + 0.25, (q + 1) * (Math.PI / 2) - 0.25);
-              c.stroke();
-            }
-            c.fillStyle = s.color;
-            c.fillRect(-2, -2, 4, 4);
-          } else if (s.shape === "cross") {
-            const gap = half * 0.3;
-            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-              c.beginPath();
-              c.moveTo(dx * gap, dy * gap);
-              c.lineTo(dx * half * 1.3, dy * half * 1.3);
-              c.stroke();
-            }
-            c.strokeRect(-gap, -gap, gap * 2, gap * 2);
-          } else {
-            c.rotate((s.shape === "diamond" ? Math.PI / 4 : 0) + (1 - t) * 1.2);
-            const arm = half * 0.42;
-            for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-              c.beginPath();
-              c.moveTo(sx * half, sy * (half - arm));
-              c.lineTo(sx * half, sy * half);
-              c.lineTo(sx * (half - arm), sy * half);
-              c.stroke();
+  designate(s, ctx) {
+    for (const who of targetsOf(s.on, ctx)) {
+      void tick(0.72, (_dt, k, _age, c) => {
+        const r = rectOf(who);
+        if (!r) return;
+        const p = midOf(r);
+        const h = Math.max(15, Math.min(r.width * 0.36, r.height * 0.9)) * lerp(1.8, 1, easeOut(Math.min(1, k / 0.22)));
+        const settling = k > 0.22 && k < 0.5 && Math.floor(k * 22) % 2 === 0;
+        c.globalAlpha = 0.9 * pulse(k, 0.08, 0.25) * (settling ? 0.45 : 1);
+        c.strokeStyle = s.tint;
+        c.lineWidth = 1.5;
+        c.beginPath();
+        if (s.shape === "diamond") {
+          c.moveTo(p.x, p.y - h);
+          c.lineTo(p.x + h, p.y);
+          c.lineTo(p.x, p.y + h);
+          c.lineTo(p.x - h, p.y);
+          c.closePath();
+        } else {
+          const arm = h * (s.shape === "cross" ? 0.5 : 0.42);
+          for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+            if (s.shape === "box") {
+              c.moveTo(p.x + sx * h, p.y + sy * (h - arm));
+              c.lineTo(p.x + sx * h, p.y + sy * h);
+              c.lineTo(p.x + sx * (h - arm), p.y + sy * h);
+            } else {
+              // Four ticks closing on the target, like a gun cross.
+              const ax = sx === sy ? sx : 0;
+              const ay = sx === sy ? 0 : sy;
+              c.moveTo(p.x + ax * h, p.y + ay * h);
+              c.lineTo(p.x + ax * (h - arm), p.y + ay * (h - arm));
             }
           }
-        },
-      });
-      later(i * 70 + 210, () => glow(p.x, p.y, size * 0.7, s.color, 0.2, 0, 0.5));
-    });
-  },
-
-  lines(s, ctx) {
-    const from = muzzle(PLAYER);
-    if (!from) return;
-    targetsOf(s.on, ctx).forEach((uid, i) => {
-      const to = center(uid);
-      if (!to) return;
-      void addEffect({
-        life: 0.55,
-        delay: i * 0.06,
-        draw: (c, k, age) => {
-          const t = Math.min(1, k / 0.3);
-          const end = { x: lerp(from.x, to.x, easeOut(t)), y: lerp(from.y, to.y, easeOut(t)) };
-          c.globalCompositeOperation = "lighter";
-          c.setLineDash([8, 6]);
-          c.lineDashOffset = -age * 160;
-          line(c, from, end, s.color, 2, pulse(k, 0.08, 0.35));
-          c.setLineDash([]);
-          c.translate(end.x, end.y);
-          c.rotate(Math.PI / 4);
-          c.strokeRect(-6, -6, 12, 12);
-        },
-      });
-    });
-  },
-
-  static(s, ctx) {
-    for (const uid of targetsOf(s.on, ctx)) {
-      const r = rectOf(uid);
-      if (r) staticBars(r, s.color, s.bars, 0.42);
-    }
-  },
-
-  glitch(s) {
-    const stage = appRoot().querySelector<HTMLElement>(".stage");
-    if (!stage) return;
-    const r = stage.getBoundingClientRect();
-    if (!reduced()) {
-      const frames: Keyframe[] = [];
-      for (let i = 0; i < 6; i++) frames.push({ transform: `translate(${rnd(-7, 7).toFixed(1)}px, ${rnd(-2, 2).toFixed(1)}px) skewX(${rnd(-1.2, 1.2).toFixed(2)}deg)` });
-      frames.push({ transform: "none" });
-      stage.animate(frames, { duration: s.ms * timeScale(), easing: "steps(7, end)" });
-    }
-    let frame = -1;
-    let bars: number[][] = [];
-    void tick(s.ms / 1000, (_dt, k, age, c) => {
-      const f = Math.floor(age / 0.05);
-      if (f !== frame) {
-        frame = f;
-        bars = Array.from({ length: 7 }, () => [Math.random(), rnd(3, 22), Math.random(), rnd(-30, 30)]);
-      }
-      c.globalCompositeOperation = "lighter";
-      for (const [fy, h, hue, dx] of bars) {
-        c.globalAlpha = 0.16 * pulse(k, 0.1, 0.4);
-        c.fillStyle = hue < 0.33 ? C.magenta : hue < 0.66 ? C.cyan : "#ffffff";
-        c.fillRect(r.left + dx, r.top + r.height * fy, r.width, h);
-      }
-    });
-  },
-
-  wave(s) {
-    const o = center(PLAYER);
-    const stage = rectOfSel(".stage");
-    if (!o || !stage) return;
-    const reach = Math.hypot(stage.width, stage.height) * 0.75;
-    for (let i = 0; i < s.rings; i++) {
-      const color = s.colors[i % s.colors.length];
-      void addEffect({
-        life: 0.62,
-        delay: i * 0.075,
-        draw: (c, k) => {
-          const e = easeOut(k);
-          c.globalCompositeOperation = "lighter";
-          c.globalAlpha = (1 - k) ** 1.3;
-          c.strokeStyle = color;
-          c.lineWidth = lerp(7, 1.5, k);
-          c.beginPath();
-          c.ellipse(o.x, o.y, reach * e, reach * e * 0.62, 0, Math.PI * 1.05, Math.PI * 1.95);
-          c.stroke();
-          c.globalAlpha *= 0.4;
-          c.beginPath();
-          c.ellipse(o.x, o.y, reach * e, reach * e * 0.62, 0, Math.PI * 0.05, Math.PI * 0.95);
-          c.stroke();
-        },
+          if (s.shape === "cross") c.rect(p.x - 1, p.y - 1, 2, 2);
+        }
+        c.stroke();
       });
     }
   },
 
-  hud(s) {
-    const pile = rectOfSel(".pile-draw");
-    const hand = rectOfSel(".hand");
-    const jet = rectOf(PLAYER);
-    if (jet) {
-      // Head-up brackets snap in around the jet.
-      const p = midOf(jet);
-      void addEffect({
-        life: 0.4,
-        draw: (c, k) => {
-          const w = jet.width * lerp(0.75, 0.6, easeOut(k));
-          const h = Math.max(jet.height * 0.7, 28);
-          c.globalCompositeOperation = "lighter";
-          c.strokeStyle = s.color;
-          c.lineWidth = 2;
-          c.globalAlpha = pulse(k, 0.15, 0.5);
-          for (const side of [-1, 1]) {
-            c.beginPath();
-            c.moveTo(p.x + side * (w - 10), p.y - h);
-            c.lineTo(p.x + side * w, p.y - h);
-            c.lineTo(p.x + side * w, p.y + h);
-            c.lineTo(p.x + side * (w - 10), p.y + h);
-            c.stroke();
-          }
-        },
+  scan(s, ctx) {
+    for (const who of targetsOf(s.on, ctx)) {
+      void tick(0.34 * s.sweeps, (_dt, k, _age, c) => {
+        const r = rectOf(who);
+        if (!r) return;
+        const t = (k * s.sweeps) % 1;
+        const x = r.left + r.width * (-0.12 + 1.24 * t);
+        c.globalCompositeOperation = "lighter";
+        c.globalAlpha = 0.55 * Math.sin(Math.PI * t);
+        c.strokeStyle = "#7dffb0";
+        c.lineWidth = 1.2;
+        c.beginPath();
+        c.moveTo(x, r.top - 6);
+        c.lineTo(x, r.bottom + 6);
+        c.moveTo(x - 4, r.top - 6);
+        c.lineTo(x + 4, r.top - 6);
+        c.moveTo(x - 4, r.bottom + 6);
+        c.lineTo(x + 4, r.bottom + 6);
+        c.stroke();
       });
     }
-    if (!pile || !hand) return;
-    const a = midOf(pile);
-    for (let i = 0; i < s.lines; i++) {
-      const b = { x: hand.left + hand.width * (0.3 + (0.4 * (i + 0.5)) / s.lines), y: hand.top + hand.height * 0.3 };
-      const ctl = { x: lerp(a.x, b.x, 0.4), y: Math.min(a.y, b.y) - 70 };
-      let prev: Pt = a;
-      void tick(
-        0.26,
-        (_dt, k) => {
-          const e = easeOut(k);
-          const u = 1 - e;
-          const p = { x: u * u * a.x + 2 * u * e * ctl.x + e * e * b.x, y: u * u * a.y + 2 * u * e * ctl.y + e * e * b.y };
-          emit({ kind: "spark", x: p.x, y: p.y, vx: (p.x - prev.x) * 60, vy: (p.y - prev.y) * 60, life: 0.16, size: 2.4, color: s.color, stretch: 0.05, g: 0, drag: 0.001 });
-          emit({ kind: "glow", x: p.x, y: p.y, size: 7, color: s.color, life: 0.1 });
-          prev = p;
-        },
-        i * 0.06,
-      );
-    }
-    flash(a.x, a.y, 20, s.color, 0.14);
-  },
-
-  siphon(s, ctx) {
-    const foes = targetsOf(ctx.target === null ? "all" : "target", ctx);
-    const hand = rectOfSel(".hand");
-    if (!foes.length || !hand) return;
-    const b = { x: hand.left + hand.width / 2, y: hand.top + hand.height * 0.3 };
-    for (let i = 0; i < s.count; i++) {
-      const a = center(foes[i % foes.length]);
-      if (!a) continue;
-      const bend = rnd(-90, 90);
-      void addEffect({
-        life: 0.34,
-        delay: i * 0.04,
-        draw: (c, k) => {
-          const e = k * k;
-          const x = lerp(a.x, b.x, e) + Math.sin(k * Math.PI) * bend;
-          const y = lerp(a.y, b.y, e);
-          c.globalCompositeOperation = "lighter";
-          c.fillStyle = s.color;
-          for (let t = 0; t < 3; t++) {
-            c.globalAlpha = (1 - t * 0.3) * pulse(k, 0.1, 0.2);
-            const size = 7 - t * 1.6;
-            c.fillRect(x - size / 2, y - size / 2 - t * 9 * (b.y > a.y ? 1 : -1), size, size);
-          }
-        },
-      });
-    }
-    later(260, () => flash(b.x, b.y, 26, s.color, 0.18));
   },
 
   repair(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    const spots = Math.max(2, Math.round(s.sparks / 5));
+    const k = Math.max(0.6, depth(PLAYER));
+    const spots = Math.max(1, Math.ceil(s.sparks / 4));
     for (let i = 0; i < spots; i++) {
-      later(i * 70, () => {
-        const x = r.left + r.width * rnd(0.22, 0.78);
-        const y = r.top + r.height * rnd(0.35, 0.7);
-        flash(x, y, 16, "#ffffff", 0.12);
-        sparks(x, y, { count: Math.ceil(s.sparks / spots), color: s.color, speed: 260, life: 0.4, size: 1.6, g: 520 });
-      });
-    }
-    const motes = Array.from({ length: 5 }, () => ({ x: r.left + r.width * rnd(0.25, 0.75), y: r.top + r.height * rnd(0.3, 0.7), d: Math.random() * 0.2, s: rnd(5, 9) }));
-    void addEffect({
-      life: 0.75,
-      draw: (c, _k, age) => {
-        c.globalCompositeOperation = "lighter";
-        c.fillStyle = s.color;
-        for (const m of motes) {
-          const t = (age - m.d) / 0.55;
-          if (t <= 0 || t >= 1) continue;
-          c.globalAlpha = pulse(t, 0.2, 0.5);
-          const y = m.y - t * 46;
-          c.fillRect(m.x - m.s, y - m.s / 3, m.s * 2, (m.s * 2) / 3);
-          c.fillRect(m.x - m.s / 3, y - m.s, (m.s * 2) / 3, m.s * 2);
-        }
-      },
-    });
-  },
-
-  tape(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    const strips = Array.from({ length: s.count }, (_, i) => ({
-      x: r.left + r.width * (0.26 + (0.48 * (i + 0.5)) / s.count),
-      y: r.top + r.height * rnd(0.42, 0.62),
-      rot: rnd(-0.7, 0.7),
-      at: i * 0.075,
-      hit: false,
-    }));
-    const len = Math.max(26, r.width * 0.2);
-    const thick = Math.max(6, r.width * 0.035);
-    void addEffect({
-      life: 0.5 + s.count * 0.075 + 0.25,
-      draw: (c, k, age) => {
-        const fade = k > 0.78 ? (1 - k) / 0.22 : 1;
-        for (const t of strips) {
-          const u = Math.min(1, (age - t.at) / 0.12);
-          if (u <= 0) continue;
-          if (u >= 1 && !t.hit) {
-            t.hit = true;
-            flash(t.x, t.y, 14, "#ffffff", 0.08);
-          }
-          c.save();
-          c.translate(t.x, t.y);
-          c.rotate(t.rot);
-          const m = lerp(1.9, 1, u * u);
-          c.scale(m, m);
-          c.globalAlpha = fade * u;
-          const g = c.createLinearGradient(0, -thick / 2, 0, thick / 2);
-          g.addColorStop(0, "#ffffff");
-          g.addColorStop(0.4, s.color);
-          g.addColorStop(1, "#7d8794");
-          c.fillStyle = g;
-          c.fillRect(-len / 2, -thick / 2, len, thick);
-          c.restore();
-        }
-      },
-    });
-  },
-
-  rivets(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    for (let i = 0; i < s.count; i++) {
-      later(i * 34, () => {
-        const t = (i + 0.5) / s.count;
-        const x = r.left + r.width * (0.14 + t * 0.72);
-        const y = r.top + r.height * (0.56 - Math.abs(t - 0.5) * 0.12);
-        flash(x, y, 9, "#ffffff", 0.08);
-        sparks(x, y, { count: 3, color: s.color, speed: 150, life: 0.22, size: 1.3, dir: -Math.PI / 2, spread: 1 });
-        emit({ kind: "dot", x, y, size: 3, color: s.color, life: 0.5 });
-        if (i % 3 === 0) sfx("tick");
+      later(i * 85, () => {
+        const p = hullPoint(PLAYER, 1.3);
+        if (!p) return;
+        glow(p.x, p.y, 9 * k, s.tint, 0.14);
+        sparks(p.x, p.y, { count: 4, color: "#ffd9a0", speed: 170 * k, life: 0.4, size: 1.3, dir: Math.PI / 2, spread: 1.3, g: 520 });
       });
     }
   },
 
-  arc(s) {
-    const a = center(PLAYER);
-    const orb = rectOfSel(".energy-orb");
-    if (!a || !orb) return;
-    const b = midOf(orb);
-    let frame = -1;
-    let bolts: Pt[][] = [];
-    void tick(0.32, (_dt, k, age, c) => {
-      const f = Math.floor(age / 0.045);
-      if (f !== frame) {
-        frame = f;
-        bolts = Array.from({ length: s.forks }, () => jagged(a, b, 8, 22));
-      }
-      c.globalCompositeOperation = "lighter";
-      for (const pts of bolts) {
-        poly(c, pts, s.color, 5, 0.3 * (1 - k));
-        poly(c, pts, "#ffffff", 1.6, 0.95 * (1 - k * 0.6));
-      }
-      if (Math.random() < 0.6) sparks(b.x, b.y, { count: 1, color: s.color, speed: 200, life: 0.25, size: 1.5 });
+  reload(s) {
+    const refilled = rearmJet(PLAYER);
+    if (reduced()) return;
+    const k = Math.max(0.6, depth(PLAYER));
+    const shown = (refilled.length ? refilled : stations(PLAYER)).slice(0, s.glint);
+    shown.forEach((el, i) => {
+      later(160 + i * 45, () => {
+        const r = el.getBoundingClientRect();
+        emit({ kind: "glow", x: r.left + r.width / 2, y: r.top + r.height * 0.6, size: 6 * k, color: "#ffffff", life: 0.2 });
+      });
     });
-    glow(b.x, b.y, orb.width * 0.7, s.color, 0.4, 30, 0.8);
-    void ring(b.x, b.y, orb.width * 0.3, orb.width * 0.9, s.color, 0.4, 3, 0.1);
   },
 
-  crack(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    const o = midOf(r);
-    const cracks = Array.from({ length: 4 }, (_, i) => {
-      const ang = (Math.PI * 2 * i) / 4 + rnd(-0.5, 0.5);
-      const len = r.width * rnd(0.22, 0.4);
-      return jagged(o, { x: o.x + Math.cos(ang) * len, y: o.y + Math.sin(ang) * len * 0.6 }, 5, 7);
-    });
-    void addEffect({
-      life: 0.6,
-      draw: (c, k) => {
-        const shown = Math.min(1, k / 0.12);
-        c.globalCompositeOperation = "lighter";
-        for (const pts of cracks) {
-          const part = pts.slice(0, Math.max(2, Math.ceil(pts.length * shown)));
-          poly(c, part, s.color, 5, 0.45 * pulse(k, 0.05, 0.5));
-          poly(c, part, "#ffffff", 1.6, pulse(k, 0.05, 0.5));
-        }
-      },
-    });
-    flash(o.x, o.y, r.width * 0.2, s.color, 0.16);
-    shards(o.x, o.y, 5, "#59626e", 200, 6);
-    pose(PLAYER, [{ transform: "none" }, { transform: "translate(-5px, 3px) rotate(-3deg)" }, { transform: "translate(5px, -2px) rotate(2.4deg)" }, { transform: "translate(-3px, 1px) rotate(-1deg)" }, { transform: "none" }], 300, "linear");
-  },
-
-  halo(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    const cx = r.left + r.width / 2;
-    const rx = r.width * 0.56;
-    const ry = Math.max(8, r.width * 0.09);
-    for (let i = 0; i < s.rings; i++) {
-      void addEffect({
-        life: 0.55,
-        delay: i * 0.1,
-        draw: (c, k) => {
-          const y = lerp(r.bottom + ry, r.top - ry, easeOut(k));
-          const a = pulse(k, 0.15, 0.45);
-          c.globalCompositeOperation = "lighter";
-          c.strokeStyle = s.color;
-          c.lineWidth = 3;
-          c.globalAlpha = a;
-          c.beginPath();
-          c.ellipse(cx, y, rx, ry, 0, 0, Math.PI * 2);
-          c.stroke();
-          c.strokeStyle = "#ffffff";
-          c.lineWidth = 1;
-          c.beginPath();
-          c.ellipse(cx, y, rx, ry, 0, Math.PI * 0.1, Math.PI * 0.9);
-          c.stroke();
-          const g = c.createLinearGradient(0, y, 0, y + 46);
-          g.addColorStop(0, s.color + "44");
-          g.addColorStop(1, s.color + "00");
-          c.globalAlpha = a * 0.8;
-          c.fillStyle = g;
-          c.fillRect(cx - rx, y, rx * 2, 46);
-        },
+  strobe(s) {
+    const k = Math.max(0.6, depth(PLAYER));
+    for (let i = 0; i < s.blinks; i++) {
+      later(i * 190, () => {
+        const tips = marks(PLAYER, "tip");
+        const mid = center(PLAYER);
+        // Port is red, starboard green; the white strobe is on the tail.
+        for (const p of tips) glow(p.x, p.y, 10 * k, mid && p.x < mid.x ? "#ff4a4a" : "#5aff8a", 0.16);
+        const tail = mark(PLAYER, "chaff");
+        if (tail && i === s.blinks - 1) later(90, () => glow(tail.x, tail.y, 12 * k, "#ffffff", 0.1));
       });
     }
-    for (let i = 0; i < 8; i++) {
-      emit({ kind: "dot", x: cx + rnd(-rx, rx), y: r.bottom - Math.random() * r.height, vy: rnd(-120, -60), life: rnd(0.35, 0.6), size: rnd(1.5, 2.8), color: s.color, flicker: 0.5, delay: Math.random() * 0.3 });
-    }
-  },
-
-  orbit(s) {
-    const r = rectOf(PLAYER);
-    if (!r) return;
-    const o = midOf(r);
-    const rx = r.width * 0.58;
-    const ry = Math.max(r.height * 0.5, r.width * 0.16);
-    void tick(0.75, (_dt, k, age) => {
-      for (let i = 0; i < s.count; i++) {
-        const ang = age * 9 + (Math.PI * 2 * i) / s.count;
-        const m = pulse(k, 0.15, 0.3);
-        emit({ kind: "glow", x: o.x + Math.cos(ang) * rx, y: o.y + Math.sin(ang) * ry, size: 6 * m + 1, color: s.color, life: 0.22 });
-      }
-    });
-  },
-
-  shells(s) {
-    const p = anchor(PLAYER, 0.5, 0.5);
-    if (!p) return;
-    for (let i = 0; i < s.count; i++) later(i * 28, () => casing(p, i % 2 ? 1 : -1));
   },
 
   spinup(s) {
-    const p = anchor(PLAYER, 0.5, 0.44);
-    const r = rectOf(PLAYER);
-    if (!p || !r) return;
-    const size = r.width * 0.06;
-    void tick(s.ms / 1000, (_dt, k) => {
-      emit({ kind: "glow", x: p.x, y: p.y, size: size * (0.6 + k * 1.6) * rnd(0.8, 1.2), color: s.color, life: 0.07 });
-      if (Math.random() < 0.5 + k * 0.5) sparks(p.x, p.y, { count: 1, color: s.color, speed: 220, life: 0.2, size: 1.4, dir: -Math.PI / 2, spread: 1.3 });
+    const k = Math.max(0.6, depth(PLAYER));
+    let since = 1;
+    void tick(s.ms / 1000, (dt) => {
+      since += dt;
+      if (since < 0.03) return;
+      since = 0;
+      const p = muzzle(PLAYER);
+      if (p) smoke(p.x, p.y, 6 * k, "#d5d9de", 0.4, { alpha: 0.2, vx: rnd(-20, 20), vy: rnd(10, 40) * k, grow: 22 * k });
     });
+  },
+
+  crack(s) {
+    const k = Math.max(0.6, depth(PLAYER));
+    const p = hullPoint(PLAYER, 1.2);
+    shudder(PLAYER, 320, 4);
+    if (!p) return;
+    flash(p.x, p.y, 10 * k, "#fff1d0", 0.08);
+    shards(p.x, p.y, s.pieces, "#59626e", 220 * k, 6 * k);
+    sparks(p.x, p.y, { count: 6, color: "#ffd9a0", speed: 220 * k, life: 0.3, size: 1.4 });
+    for (let i = 0; i < 3; i++) smoke(p.x, p.y, 14 * k, "#3a3d44", 0.8, { alpha: 0.45, vy: 50 * k, grow: 36 * k, delay: i * 0.06 });
   },
 };
 
-/** Every cast primitive the runtime can draw, for the test that checks the recipes against it. */
+/** Every cast animation the runtime can draw, for the test that checks the recipes against it. */
 export const STEP_KINDS = Object.keys(STEPS) as Step["fx"][];
-
-let glint: HTMLCanvasElement | null = null;
-let glintColor = "";
-
-function glintSprite(color: string): HTMLCanvasElement {
-  if (glint && glintColor === color) return glint;
-  glint = document.createElement("canvas");
-  glint.width = glint.height = 28;
-  const c = glint.getContext("2d")!;
-  const g = c.createRadialGradient(14, 14, 0, 14, 14, 14);
-  g.addColorStop(0, "#ffffff");
-  g.addColorStop(0.3, color);
-  g.addColorStop(1, color + "00");
-  c.fillStyle = g;
-  c.fillRect(0, 0, 28, 28);
-  glintColor = color;
-  return glint;
-}
-
-function casing(p: Pt, side: number) {
-  emit({ kind: "shard", x: p.x, y: p.y, vx: side * rnd(90, 190), vy: rnd(-150, -40), g: 900, drag: 0.6, life: rnd(0.5, 0.8), size: 7, stretch: 0.4, rot: rnd(0, 6), vr: rnd(-20, 20), color: "#e8b653" });
-}
 
 /**
  * Plays a card's cast on the player's jet and resolves once its events should start. With reduced
- * motion the cast is skipped; its sounds still play.
+ * motion the cast is skipped; its sounds still play, and pylons are still rearmed.
  */
 export async function castCard(id: string, target: number | null): Promise<void> {
   const anim = cardAnim(id);
@@ -974,7 +618,7 @@ export async function castCard(id: string, target: number | null): Promise<void>
   for (const step of anim.cast) {
     later(step.at ?? 0, () => {
       if (step.sfx) sfx(step.sfx);
-      if (!reduced()) (STEPS[step.fx] as (s: Step, ctx: CastCtx) => void)(step, ctx);
+      if (!reduced() || step.fx === "reload") (STEPS[step.fx] as (s: Step, ctx: CastCtx) => void)(step, ctx);
     });
   }
   await wait(reduced() ? Math.min(anim.lead, 90) : Math.min(anim.lead, MAX_LEAD));
@@ -982,391 +626,354 @@ export async function castCard(id: string, target: number | null): Promise<void>
 
 /* ----------------------------------------------------------------- shots */
 
-const SMOKE: Record<string, { color: string; size: number; life: number; gap: number; alpha: number }> = {
-  white: { color: "#e6ebf2", size: 15, life: 1.0, gap: 9, alpha: 0.65 },
-  grey: { color: "#aab2be", size: 20, life: 1.25, gap: 8, alpha: 0.5 },
-  dark: { color: "#4a4f58", size: 20, life: 1.3, gap: 7, alpha: 0.6 },
-  thin: { color: "#dfe6ee", size: 10, life: 0.5, gap: 10, alpha: 0.5 },
-};
-
-function gunPort(who: number, origin: "nose" | "wings" | "chin", index: number): Pt | null {
-  if (who !== PLAYER) return muzzle(who);
-  if (origin === "wings") return anchor(who, index % 2 ? 0.66 : 0.34, 0.5);
-  if (origin === "chin") return anchor(who, 0.5, 0.44);
-  return muzzle(who);
-}
-
-function rail(who: number, side: "left" | "right" | "both" | "belly", index: number): { p: Pt; dir: number } | null {
-  if (who !== PLAYER) {
-    const p = muzzle(who);
-    return p ? { p, dir: index % 2 ? 1 : -1 } : null;
-  }
-  const dir = side === "left" ? -1 : side === "right" ? 1 : side === "both" ? (index % 2 ? 1 : -1) : 0;
-  const p = anchor(who, 0.5 + dir * 0.22, dir ? 0.56 : 0.62);
-  return p ? { p, dir: dir || (Math.random() < 0.5 ? -1 : 1) } : null;
-}
-
-function quad(a: Pt, c: Pt, b: Pt, t: number): Pt {
-  const u = 1 - t;
-  return { x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y };
-}
-
 interface Aim {
   from: number;
   to: number;
-  /** Which hit of the card this is, so pairs alternate rails and bursts walk. */
   index: number;
+  /** The target's centre when the shot was fired. */
   b: Pt;
+  /** How near the camera the shooter and the target are. */
   ka: number;
   kb: number;
+  /** The shot is dodged: it goes past instead of landing. */
+  miss: boolean;
+}
+
+const SMOKE = {
+  white: { color: "#f2f4f7", size: 3.4, life: 1.35, alpha: 0.8 },
+  grey: { color: "#c3c9d2", size: 4.2, life: 1.6, alpha: 0.75 },
+  thin: { color: "#e6ebf1", size: 1.9, life: 0.6, alpha: 0.45 },
+};
+
+/** A missile or bomb seen from dead astern: its tail fins in an X, and the motor's glare if it is burning. */
+function sternView(c: Ctx2, x: number, y: number, r: number, lit: number, body = "#e3e8ee") {
+  c.globalCompositeOperation = "source-over";
+  c.lineCap = "round";
+  const f = r * 1.75;
+  c.beginPath();
+  c.moveTo(x - f, y - f);
+  c.lineTo(x + f, y + f);
+  c.moveTo(x + f, y - f);
+  c.lineTo(x - f, y + f);
+  c.strokeStyle = INK;
+  c.lineWidth = Math.max(1, r * 0.6);
+  c.stroke();
+  c.strokeStyle = "#aab6c6";
+  c.lineWidth = Math.max(0.5, r * 0.24);
+  c.stroke();
+  c.beginPath();
+  c.arc(x, y, r, 0, TAU);
+  c.fillStyle = body;
+  c.fill();
+  c.strokeStyle = INK;
+  c.lineWidth = Math.max(0.7, r * 0.28);
+  c.stroke();
+  c.beginPath();
+  c.arc(x, y, r * 0.45, 0, TAU);
+  c.fillStyle = "#161a21";
+  c.fill();
+  if (lit <= 0) return;
+  const alpha = c.globalAlpha;
+  c.globalCompositeOperation = "lighter";
+  c.globalAlpha = alpha * lit;
+  const g = r * rnd(4.2, 5.4) + 3;
+  c.drawImage(fxSprite("glow", FIRE), x - g, y - g, g * 2, g * 2);
+  const w = r * 1.8 + 1.5;
+  c.drawImage(fxSprite("glow", "#ffffff"), x - w, y - w, w * 2, w * 2);
+  c.globalAlpha = alpha;
+}
+
+function bezier(a: Pt, c1: Pt, c2: Pt, b: Pt, t: number): Pt {
+  const u = 1 - t;
+  return {
+    x: u * u * u * a.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * b.x,
+    y: u * u * u * a.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * b.y,
+  };
+}
+
+/** The gun firing: a stab of flame out of the muzzle towards the target, and smoke swept back past the jet. */
+function muzzleFlash(a: Pt, toward: Pt, k: number, cal: number, round: number) {
+  const dir = Math.atan2(toward.y - a.y, toward.x - a.x);
+  const s = (8 + 7 * cal) * k * rnd(0.8, 1.2);
+  flash(a.x, a.y, s * 0.9, "#ffd27a", 0.07);
+  void addEffect({
+    life: 0.06,
+    draw: (c, t) => {
+      c.globalCompositeOperation = "lighter";
+      c.globalAlpha = 1 - t;
+      c.translate(a.x, a.y);
+      c.rotate(dir);
+      const g = c.createLinearGradient(0, 0, s * 2.8, 0);
+      g.addColorStop(0, "#ffffff");
+      g.addColorStop(0.4, "#ffc45a");
+      g.addColorStop(1, "#ff7a2a00");
+      c.fillStyle = g;
+      c.beginPath();
+      c.moveTo(0, -s * 0.34);
+      c.quadraticCurveTo(s * 1.3, -s * 0.55, s * 2.8, 0);
+      c.quadraticCurveTo(s * 1.3, s * 0.55, 0, s * 0.34);
+      c.fill();
+      // The gases that escape sideways at the muzzle.
+      c.fillRect(-s * 0.12, -s * 0.9, s * 0.24, s * 1.8);
+    },
+  });
+  if (round % 2 === 0) smoke(a.x, a.y, (6 + 5 * cal) * k, "#d5d9de", 0.45 + 0.2 * cal, { alpha: 0.12 + 0.1 * cal, vx: rnd(-14, 14), vy: rnd(14, 44) * k, grow: (16 + 12 * cal) * k });
+}
+
+/** One round striking metal. */
+function roundHit(p: Pt, k: number, cal: number) {
+  flash(p.x, p.y, (5 + 3 * cal) * k + 2, "#fff1d0", 0.07);
+  sparks(p.x, p.y, { count: 3 + Math.round(cal * 2), color: "#ffd9a0", speed: 220 * k + 70, life: 0.22, size: 1.1 + 0.3 * cal, dir: Math.PI / 2, spread: 1.5, g: 320 });
+  if (Math.random() < 0.35 * cal) smoke(p.x, p.y, (7 + 4 * cal) * k, "#8a9099", 0.45, { alpha: 0.3 });
+}
+
+/** A small warhead or bomblet going off. */
+function pop(p: Pt, k: number) {
+  flash(p.x, p.y, 15 * k + 4, FIRE, 0.1);
+  sparks(p.x, p.y, { count: 6, color: "#ffd9a0", speed: 240 * k + 60, life: 0.28, size: 1.3 });
+  glow(p.x, p.y, 9 * k + 2, FLAME, 0.22, 30 * k);
+  smoke(p.x, p.y, 16 * k + 4, "#4a4e56", 0.6, { alpha: 0.4 });
+}
+
+/** The shooter presses in close behind its target for a gun pass, then drops back. */
+function closeIn(from: number, to: number, ms: number) {
+  const a = center(from);
+  const b = center(to);
+  if (!a || !b) return;
+  const move = `translate(${((b.x - a.x) * 0.3).toFixed(0)}px, ${((b.y - a.y) * 0.34).toFixed(0)}px) scale(0.8)`;
+  pose(from, [{ transform: "none" }, { transform: move, offset: 0.3 }, { transform: move, offset: 0.68 }, { transform: "none" }], ms, "ease-in-out");
 }
 
 const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = {
-  tracer(s, aim) {
-    const { b, ka, kb } = aim;
-    const life = s.ms / 1000;
+  gun(s, aim) {
+    const { from, to, ka, kb } = aim;
+    const cal = s.caliber;
+    const flight = s.ms / 1000;
+    const rect = spriteEl(to)?.getBoundingClientRect();
+    const burst = (s.rounds - 1) * s.gap;
+    if (aim.index === 0) {
+      if (s.pass) closeIn(from, to, burst + s.ms + 320);
+      else if (cal > 1.3) shudder(from, burst + 140, 2.5);
+    }
+    let struck: Pt | null = null;
     for (let i = 0; i < s.rounds; i++) {
-      const a = gunPort(aim.from, s.origin, aim.index * s.rounds + i);
-      if (!a) continue;
-      const walk = s.walk ? ((i + 0.5) / s.rounds - 0.5) * s.walk * kb * (aim.index % 2 ? -1 : 1) : 0;
-      const end = { x: b.x + walk + rnd(-1, 1) * s.spread * kb, y: b.y + rnd(-1, 1) * s.spread * 0.6 * kb };
-      const dx = end.x - a.x;
-      const dy = end.y - a.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const delay = (i * s.gap) / 1000;
+      const t = s.rounds > 1 ? i / (s.rounds - 1) - 0.5 : 0;
+      const hull = hullPoint(to, 0.8) ?? aim.b;
+      const land = { x: hull.x + t * (s.walk ?? 0) * kb + rnd(-1, 1) * s.spread * kb * 0.4, y: hull.y + rnd(-1, 1) * s.spread * kb * 0.25 };
+      // Not every round connects: some go wide and carry on past the target.
+      const wide = aim.miss || Math.random() < (s.spread > 20 ? 0.45 : 0.14);
+      if (wide && rect) {
+        land.x += (Math.random() < 0.5 ? -1 : 1) * rect.width * rnd(0.45, 0.8);
+        land.y -= rect.height * rnd(0.3, 1);
+      } else struck = land;
+      const far = wide ? kb * 0.55 : kb;
+      let a: Pt | null = null;
       void addEffect({
-        life,
-        delay,
+        life: flight * (wide ? 1.25 : 1),
+        delay: (i * s.gap) / 1000,
         draw: (c, k) => {
-          const head = { x: a.x + dx * k, y: a.y + dy * k };
-          // A round can only trail as far as it has flown: it grows out of the muzzle.
-          const streak = Math.min(len * k, lerp(120 * ka, 46 * kb, k));
-          const tail = { x: head.x - (dx / len) * streak, y: head.y - (dy / len) * streak };
-          const w = s.width * lerp(ka * 1.9, kb * 1.25, k);
+          if (!a) {
+            // Read the muzzle as the round leaves, so a jet that is moving still fires from its gun.
+            a = muzzle(from);
+            if (!a) return;
+            muzzleFlash(a, land, ka, cal, i);
+          }
+          // A round flying away from the camera closes on its vanishing point: fast at first, then slower.
+          const e = 1 - (1 - k) ** 1.45;
+          const tail = Math.max(0, e - 0.14 * (1 - e * 0.6));
+          const sc = lerp(ka, far, e);
+          const hx = lerp(a.x, land.x, e);
+          const hy = lerp(a.y, land.y, e);
           c.globalCompositeOperation = "lighter";
           c.lineCap = "round";
-          line(c, tail, head, s.color, w * 3.6, 0.22);
-          line(c, tail, head, s.color, w * 1.5, 0.9);
-          line(c, { x: lerp(tail.x, head.x, 0.35), y: lerp(tail.y, head.y, 0.35) }, head, "#ffffff", w * 0.7, 1);
+          c.globalAlpha = wide ? 1 - k * k : 1;
+          c.strokeStyle = TRACER;
+          c.lineWidth = 2.2 * cal * sc + 0.8;
+          c.beginPath();
+          c.moveTo(lerp(a.x, land.x, tail), lerp(a.y, land.y, tail));
+          c.lineTo(hx, hy);
+          c.stroke();
+          c.strokeStyle = "#fff3d6";
+          c.lineWidth = cal * sc + 0.4;
+          c.beginPath();
+          c.moveTo(lerp(a.x, land.x, (tail + e) / 2), lerp(a.y, land.y, (tail + e) / 2));
+          c.lineTo(hx, hy);
+          c.stroke();
+          const g = 5 * cal * sc + 2;
+          c.drawImage(fxSprite("glow", TRACER), hx - g, hy - g, g * 2, g * 2);
         },
         done: () => {
-          emit({ kind: "glow", x: end.x, y: end.y, size: 9 * kb + 3, color: s.color, life: 0.1 });
-          sparks(end.x, end.y, { count: 2, color: s.color, speed: 200 * kb + 60, life: 0.22, size: 1.4 });
+          if (!wide) roundHit(land, kb, cal);
         },
       });
-      later(i * s.gap, () => {
-        emit({ kind: "glow", x: a.x, y: a.y, size: (26 + Math.random() * 12) * ka * (s.width / 2.5), color: s.color, life: 0.07 });
-        emit({ kind: "glow", x: a.x, y: a.y, size: 10 * ka, color: "#ffffff", life: 0.05 });
-        sparks(a.x, a.y, { count: 2, color: s.color, speed: 420 * ka, life: 0.12, size: 1.6, dir: Math.atan2(dy, dx), spread: 0.35, g: 0 });
-        if (s.shells && i % 2 === 0) casing(a, i % 4 ? 1 : -1);
-      });
     }
-    return wait(s.ms + s.rounds * s.gap * 0.35);
+    if (struck) setLanding(to, struck);
+    return wait(s.ms + burst * 0.55);
   },
 
-  missile(s, aim) {
-    const { b, ka, kb } = aim;
-    const start = rail(aim.from, s.rail, aim.index);
-    if (!start) return Promise.resolve();
-    const a = start.p;
-    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    const ctl = { x: mid.x + start.dir * (50 + Math.random() * 50) * ka, y: Math.min(a.y, b.y) - s.loft * ka + (s.loft < 0 ? Math.abs(a.y - b.y) * 0.6 : 0) };
-    const trail = s.trail === "none" ? null : SMOKE[s.trail];
-    flash(a.x, a.y, 20 * s.size * ka, s.flame, 0.14);
-    if (trail) for (let i = 0; i < 3; i++) smoke(a.x, a.y + 4, 24 * s.size * ka, trail.color, 0.6);
-    let last = a;
-    let lastPuff = a;
-    return tick(s.ms / 1000, (_dt, k, _age, c) => {
-      const e = k ** 1.6;
-      const p = quad(a, ctl, b, e);
-      const scale = Math.max(0.55, lerp(ka, kb, e)) * s.size * 1.5;
-      const ang = Math.atan2(p.y - last.y, p.x - last.x);
-      if (s.wobble) {
-        const off = Math.sin(k * Math.PI * 5) * s.wobble * (1 - e) * ka;
-        p.x += -Math.sin(ang) * off;
-        p.y += Math.cos(ang) * off;
-      }
-      if (trail) {
-        const run = Math.hypot(p.x - lastPuff.x, p.y - lastPuff.y);
-        const n = Math.floor(run / trail.gap);
-        for (let i = 1; i <= n; i++) {
-          const f = (i * trail.gap) / run;
-          smoke(lerp(lastPuff.x, p.x, f), lerp(lastPuff.y, p.y, f), trail.size * scale, trail.color, trail.life, { alpha: trail.alpha });
+  async missile(s, aim) {
+    const { from, to, ka, kb } = aim;
+    const store = release(from, s.store === "agm" ? ["agm", "bay"] : ["aam", "bay"]);
+    if (!store) return wait(s.ms);
+    const trail = SMOKE[s.smoke];
+    const r0 = Math.max(2.4, store.w * (store.bay ? 0.09 : s.store === "agm" ? 0.26 : 0.2));
+    if (store.bay) await wait(130);
+    // It falls clear of the jet before the motor lights.
+    const fall = store.w * (store.bay ? 0.7 : 0.8);
+    await tick((store.bay ? 0.15 : 0.12) * (from === PLAYER ? 1 : 0.8), (_dt, k, _age, c) => sternView(c, store.p.x, store.p.y + fall * k * k, r0, 0));
+    const p0 = { x: store.p.x, y: store.p.y + fall };
+    flash(p0.x, p0.y, r0 * 3.2 * s.size, FIRE, 0.12);
+    for (let i = 0; i < 4; i++) smoke(p0.x, p0.y, r0 * trail.size * 1.4, trail.color, trail.life, { alpha: trail.alpha, vx: rnd(-20, 20), vy: rnd(20, 70) * ka, grow: r0 * trail.size * 3 });
+    const rect = spriteEl(to)?.getBoundingClientRect();
+    const hull = hullPoint(to, 0.6) ?? aim.b;
+    // A dodged missile loses its lock and sails by wide of the target.
+    const land = aim.miss && rect ? { x: hull.x + store.side * rect.width * 0.75, y: hull.y - rect.height * 1.3 } : hull;
+    const far = (kb / ka) * (aim.miss ? 0.5 : 1);
+    // It surges straight ahead off the rail, then the seeker pulls it round onto the target.
+    const c1 = { x: p0.x + store.side * (16 + s.loft * 0.5) * ka, y: lerp(p0.y, land.y, 0.5) - s.loft * ka };
+    const c2 = { x: land.x + store.side * (16 + s.loft * 0.4) * kb * 2, y: land.y + (36 - s.loft * 0.3) * kb };
+    let prev = 0;
+    let last: Pt = p0;
+    await addEffect({
+      life: (s.ms / 1000) * (aim.miss ? 1.2 : 1),
+      draw: (c, k) => {
+        const e = (k ** 1.7 * (1 - 0.25 * k)) / 0.75;
+        const steps = Math.max(1, Math.ceil((e - prev) / 0.012));
+        for (let i = 1; i <= steps; i++) {
+          const t = prev + ((e - prev) * i) / steps;
+          const p = bezier(p0, c1, c2, land, t);
+          const r = r0 * lerp(1, far, t) * s.size;
+          if (Math.hypot(p.x - last.x, p.y - last.y) < r * 1.5) continue;
+          last = p;
+          smoke(p.x, p.y, r * trail.size, trail.color, trail.life, { alpha: trail.alpha * (aim.miss ? 0.7 : 1), vx: rnd(-4, 4), vy: rnd(2, 12), grow: r * trail.size * 1.5 });
         }
-        if (n) lastPuff = { x: lerp(lastPuff.x, p.x, (n * trail.gap) / run), y: lerp(lastPuff.y, p.y, (n * trail.gap) / run) };
-      }
-      const tail = { x: p.x - Math.cos(ang) * 9 * scale, y: p.y - Math.sin(ang) * 9 * scale };
-      emit({ kind: "glow", x: tail.x, y: tail.y, size: (trail ? 13 : 8) * scale * rnd(0.8, 1.2) + 1, color: s.flame, life: trail ? 0.09 : 0.16 });
-      emit({ kind: "glow", x: tail.x, y: tail.y, size: 5 * scale, color: "#ffffff", life: 0.05 });
-      if (trail) {
-        // A hot streak of exhaust behind the motor, so the eye can follow it at speed.
-        c.globalCompositeOperation = "lighter";
-        line(c, { x: p.x - Math.cos(ang) * 46 * scale, y: p.y - Math.sin(ang) * 46 * scale }, tail, s.flame, 3.2 * scale, 0.5);
-        c.globalCompositeOperation = "source-over";
-      }
-      c.translate(p.x, p.y);
-      c.rotate(ang);
-      c.scale(scale, scale);
-      c.globalAlpha = trail ? 1 : 0.75;
-      c.fillStyle = trail ? "#eef2f6" : "#5d6a80";
-      c.fillRect(-9, -2, 16, 4);
-      c.fillStyle = "#2a3038";
-      c.beginPath();
-      c.moveTo(7, -2);
-      c.lineTo(12, 0);
-      c.lineTo(7, 2);
-      c.fill();
-      c.fillRect(-10, -4.5, 4, 9);
-      last = p;
+        prev = e;
+        const p = bezier(p0, c1, c2, land, e);
+        if (aim.miss) c.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : 1;
+        sternView(c, p.x, p.y, Math.max(0.8, r0 * lerp(1, far, e)), Math.min(1, k * 8) * s.size ** 0.5);
+      },
     });
+    if (!aim.miss) setLanding(to, land);
   },
 
   rocket(s, aim) {
-    const { b, ka, kb } = aim;
+    const { from, to, ka, kb } = aim;
+    const pods = stations(from).filter((el) => el.dataset.kind === "pod");
+    let struck: Pt | null = null;
     for (let i = 0; i < s.count; i++) {
-      const a = anchor(aim.from, i % 2 ? 0.74 : 0.26, 0.56) ?? b;
-      const end = { x: b.x + rnd(-1, 1) * s.spread * kb, y: b.y + rnd(-1, 1) * s.spread * 0.6 * kb };
-      const ang = Math.atan2(end.y - a.y, end.x - a.x);
-      let puff = 0;
-      later(i * 45, () => flash(a.x, a.y, 12 * ka, s.flame, 0.1));
-      void tick(
-        s.ms / 1000,
-        (dt, k, _age, c) => {
-          const e = k ** 1.3;
-          const p = { x: lerp(a.x, end.x, e), y: lerp(a.y, end.y, e) };
-          const scale = lerp(ka, kb, e);
-          puff += dt;
-          if (puff > 0.018) {
-            puff = 0;
-            smoke(p.x, p.y, 7 * scale, "#d9dee6", 0.4, { alpha: 0.4 });
-          }
-          emit({ kind: "glow", x: p.x, y: p.y, size: 7 * scale + 1, color: s.flame, life: 0.06 });
-          c.globalCompositeOperation = "lighter";
-          c.lineCap = "round";
-          line(c, { x: p.x - Math.cos(ang) * 16 * scale, y: p.y - Math.sin(ang) * 16 * scale }, p, s.flame, 2.4 * scale, 0.9);
-        },
-        (i * 45) / 1000,
-      ).then(() => {
-        flash(end.x, end.y, 14 * kb + 4, s.flame, 0.12);
-        sparks(end.x, end.y, { count: 4, color: s.flame, speed: 180 * kb + 60, life: 0.25, size: 1.5 });
-      });
-    }
-    return wait(s.ms + (s.count - 1) * 45 * 0.5);
-  },
-
-  bomb(s, aim) {
-    const { b, ka, kb } = aim;
-    const a = anchor(aim.from, 0.5, 0.62) ?? b;
-    const ctl = { x: lerp(a.x, b.x, 0.35) + rnd(-20, 20), y: a.y + 54 * ka };
-    const splitAt = 0.68;
-    const lets = Array.from({ length: s.split }, (_, i) => {
-      const ang = (Math.PI * 2 * i) / Math.max(1, s.split) + rnd(-0.3, 0.3);
-      return { x: Math.cos(ang) * 38 * kb, y: Math.sin(ang) * 22 * kb };
-    });
-    let split = false;
-    return tick(s.ms / 1000, (_dt, k, age, c) => {
-      const e = k ** 1.35;
-      const p = quad(a, ctl, b, e);
-      const scale = lerp(ka * 1.1, kb, e);
-      if (s.split && k >= splitAt) {
-        if (!split) {
-          split = true;
-          flash(p.x, p.y, 16 * scale, "#ffffff", 0.1);
-          sparks(p.x, p.y, { count: 6, color: s.color, speed: 120, life: 0.2, size: 1.2 });
-        }
-        const u = (k - splitAt) / (1 - splitAt);
-        const at = quad(a, ctl, b, splitAt ** 1.35);
-        c.fillStyle = "#2c3138";
-        for (const l of lets) {
-          const x = lerp(at.x, b.x + l.x, u);
-          const y = lerp(at.y, b.y + l.y, u * u);
-          c.fillRect(x - 2 * scale, y - 2 * scale, 4 * scale, 4 * scale);
-          if (Math.random() < 0.3) emit({ kind: "dot", x, y, size: 1.6, color: s.color, life: 0.15 });
-        }
-        return;
-      }
-      c.translate(p.x, p.y);
-      c.rotate(age * 7);
-      c.scale(scale, scale);
-      c.fillStyle = "#2c3138";
-      c.beginPath();
-      c.ellipse(0, 0, 9, 3.6, 0, 0, Math.PI * 2);
-      c.fill();
-      c.fillStyle = s.color;
-      c.fillRect(-11, -4.5, 4, 9);
-      if (Math.random() < 0.5) emit({ kind: "glow", x: p.x, y: p.y, size: 5 * scale + 1, color: s.color, life: 0.12, alpha: 0.6 });
-    });
-  },
-
-  beam(s, aim) {
-    const a = muzzle(aim.from);
-    const { b, ka, kb } = aim;
-    if (!a) return Promise.resolve();
-    void tick(s.ms / 1000, (_dt, k, _age, c) => {
-      const reach = Math.min(1, k / 0.14);
-      const tip = { x: lerp(a.x, b.x, reach), y: lerp(a.y, b.y, reach) };
-      const beat = s.pulses > 1 ? 0.35 + 0.65 * Math.abs(Math.sin(k * Math.PI * s.pulses)) : pulse(k, 0.1, 0.3);
-      const w = s.width * lerp(ka * 1.4, kb, 0.5);
-      c.globalCompositeOperation = "lighter";
-      c.lineCap = "round";
-      line(c, a, tip, s.color, w * 3.2, 0.22 * beat);
-      line(c, a, tip, s.color, w * 1.4, 0.75 * beat);
-      line(c, a, tip, "#ffffff", w * 0.5, beat);
-      emit({ kind: "glow", x: a.x, y: a.y, size: 10 * ka * beat + 2, color: s.color, life: 0.06 });
-      if (reach >= 1) {
-        emit({ kind: "glow", x: b.x, y: b.y, size: (14 + s.width * 2) * kb * beat + 2, color: s.color, life: 0.07 });
-        if (Math.random() < 0.7) sparks(b.x, b.y, { count: 1, color: s.color, speed: 220 * kb + 50, life: 0.25, size: 1.4 });
-      }
-    });
-    return wait(s.ms * 0.45);
-  },
-
-  bolt(s, aim) {
-    const a = muzzle(aim.from);
-    const { b } = aim;
-    if (!a) return Promise.resolve();
-    let frame = -1;
-    let bolts: Pt[][] = [];
-    void tick(s.ms / 1000, (_dt, k, age, c) => {
-      const f = Math.floor(age / 0.04);
-      if (f !== frame) {
-        frame = f;
-        bolts = Array.from({ length: s.forks }, (_, i) => jagged(a, { x: b.x + (i ? rnd(-18, 18) : 0), y: b.y + (i ? rnd(-12, 12) : 0) }, 9, i ? 30 : 18));
-      }
-      c.globalCompositeOperation = "lighter";
-      bolts.forEach((pts, i) => {
-        poly(c, pts, s.color, i ? 3 : 6, (i ? 0.25 : 0.4) * (1 - k * 0.7));
-        poly(c, pts, "#ffffff", i ? 1 : 2, (i ? 0.6 : 1) * (1 - k * 0.5));
-      });
-    });
-    flash(a.x, a.y, 18, s.color, 0.1);
-    return wait(s.ms * 0.4);
-  },
-
-  packet(s, aim) {
-    const a = muzzle(aim.from);
-    const { b, ka, kb } = aim;
-    if (!a) return Promise.resolve();
-    const big = s.count === 1;
-    for (let i = 0; i < s.count; i++) {
-      const bend = big ? 0 : rnd(-26, 26);
+      const hull = hullPoint(to, 1) ?? aim.b;
+      const land = { x: hull.x + rnd(-1, 1) * s.spread * kb, y: hull.y + rnd(-1, 1) * s.spread * kb * 0.5 };
+      struck = land;
+      let a: Pt | null = null;
+      let last: Pt | null = null;
       void addEffect({
         life: s.ms / 1000,
-        delay: i * 0.04,
-        draw: (c, k, age) => {
-          c.globalCompositeOperation = "lighter";
-          for (let t = 0; t < 4; t++) {
-            const kk = Math.max(0, k - t * 0.05);
-            const e = kk ** 1.4;
-            const scale = lerp(ka, kb, e) * (big ? 2.2 : 1);
-            const x = lerp(a.x, b.x, e) + Math.sin(kk * Math.PI) * bend;
-            const y = lerp(a.y, b.y, e);
-            const size = (8 - t * 1.5) * scale;
-            c.save();
-            c.translate(x, y);
-            c.rotate(big ? age * 8 : Math.PI / 4);
-            c.globalAlpha = (1 - t * 0.26) * (big && Math.floor(age / 0.05) % 2 ? 0.6 : 1);
-            c.fillStyle = t === 0 ? "#ffffff" : s.color;
-            c.fillRect(-size / 2, -size / 2, size, size);
-            c.strokeStyle = s.color;
-            c.lineWidth = 1.5;
-            c.strokeRect(-size * 0.9, -size * 0.9, size * 1.8, size * 1.8);
-            c.restore();
-          }
-        },
-      });
-    }
-    flash(a.x, a.y, 14, s.color, 0.1);
-    return wait(s.ms);
-  },
-
-  shock(s, aim) {
-    const a = muzzle(aim.from);
-    const { b, ka, kb } = aim;
-    if (!a) return Promise.resolve();
-    const ang = Math.atan2(b.y - a.y, b.x - a.x);
-    flash(a.x, a.y, 30 * ka, s.color, 0.14);
-    for (let i = 0; i < s.rings; i++) {
-      void addEffect({
-        life: s.ms / 1000,
-        delay: i * 0.055,
+        delay: i * 0.07,
         draw: (c, k) => {
-          const e = easeOut(k);
-          const x = lerp(a.x, b.x, e);
-          const y = lerp(a.y, b.y, e);
-          const r = lerp(16 * ka, 58 * kb + 10, e);
+          if (!a) {
+            // Rockets ripple out of alternate pods.
+            const pod = pods[(i + aim.index) % Math.max(1, pods.length)]?.getBoundingClientRect();
+            a = pod ? { x: pod.left + pod.width / 2, y: pod.top + pod.height * 0.6 } : muzzle(from);
+            if (!a) return;
+            flash(a.x, a.y, 9 * ka, FIRE, 0.07);
+            smoke(a.x, a.y, 9 * ka, "#d5d9de", 0.5, { alpha: 0.3, vy: 60 * ka, grow: 30 * ka });
+          }
+          const e = k ** 1.3;
+          const p = { x: lerp(a.x, land.x, e), y: lerp(a.y, land.y, e) };
+          const r = 2.4 * lerp(ka, kb, e) + 0.6;
+          if (!last || Math.hypot(p.x - last.x, p.y - last.y) > r * 2.4) {
+            last = p;
+            smoke(p.x, p.y, r * 1.6, "#e6ebf1", 0.45, { alpha: 0.34, vx: 0, vy: 4, grow: r * 2.4 });
+          }
           c.globalCompositeOperation = "lighter";
-          c.strokeStyle = s.color;
-          c.lineCap = "round";
-          c.lineWidth = lerp(6, 2, k);
-          c.globalAlpha = (1 - k) ** 0.8;
-          c.beginPath();
-          c.arc(x - Math.cos(ang) * r, y - Math.sin(ang) * r, r, ang - 0.95, ang + 0.95);
-          c.stroke();
+          c.drawImage(fxSprite("glow", FIRE), p.x - r * 2.6, p.y - r * 2.6, r * 5.2, r * 5.2);
+          c.drawImage(fxSprite("glow", "#ffffff"), p.x - r, p.y - r, r * 2, r * 2);
         },
+        done: () => pop(land, kb),
       });
     }
-    return wait(s.ms * 0.85);
+    if (struck) setLanding(to, struck);
+    return wait(s.ms + (s.count - 1) * 70 * 0.6);
   },
 
-  pass(s, aim) {
-    const a = center(aim.from);
-    const { b, kb } = aim;
-    if (!a) return Promise.resolve();
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    pose(
-      aim.from,
-      [
-        { transform: "translate(0, 0) scale(1) rotate(0deg)" },
-        { transform: `translate(${(-dx * 0.03).toFixed(0)}px, ${(-dy * 0.05).toFixed(0)}px) scale(1.05) rotate(0deg)`, offset: 0.12 },
-        { transform: `translate(${(dx * 0.42).toFixed(0)}px, ${(dy * 0.42).toFixed(0)}px) scale(.66) rotate(${dx < 0 ? -22 : 22}deg)`, offset: 0.48 },
-        { transform: `translate(${(dx * 0.3).toFixed(0)}px, ${(dy * 0.36).toFixed(0)}px) scale(.72) rotate(${dx < 0 ? 14 : -14}deg)`, offset: 0.62 },
-        { transform: "translate(0, 0) scale(1) rotate(0deg)" },
-      ],
-      s.ms * 2.4,
-      "cubic-bezier(.45,.05,.3,1)",
-    );
-    const ang = Math.atan2(dy, dx);
-    void tick(s.ms / 1000, (_dt, k) => {
-      const p = { x: a.x + dx * 0.42 * k + rnd(-18, 18), y: a.y + dy * 0.42 * k + rnd(-10, 10) };
-      emit({ kind: "spark", x: p.x, y: p.y, vx: -Math.cos(ang) * 500, vy: -Math.sin(ang) * 500, life: 0.16, size: 1.8, color: s.color, stretch: 0.09, g: 0 });
+  async bomb(s, aim) {
+    const { from, to, ka, kb } = aim;
+    const bay = stations(from).find((el) => el.dataset.kind === "bay");
+    let a = mark(from, "belly") ?? muzzle(from);
+    if (bay) {
+      const r = bay.getBoundingClientRect();
+      a = { x: r.left + r.width / 2, y: r.top + r.height * 0.3 };
+      bay.classList.add("open");
+      later(620, () => bay.classList.remove("open"));
+      await wait(90);
+    }
+    if (!a) return wait(s.ms);
+    const start = a;
+    const land = hullPoint(to, 0.5) ?? aim.b;
+    const r0 = 4.6 * s.size * ka;
+    // It sinks away under the jet first, then its own speed carries it on to the target.
+    const sag = { x: lerp(start.x, land.x, 0.3), y: start.y + 60 * ka };
+    const split = s.split > 0 ? 0.72 : 1;
+    const at = (t: number): Pt => ({ x: (1 - t) ** 2 * start.x + 2 * (1 - t) * t * sag.x + t * t * land.x, y: (1 - t) ** 2 * start.y + 2 * (1 - t) * t * sag.y + t * t * land.y });
+    await addEffect({
+      life: (s.ms / 1000) * split,
+      draw: (c, k) => {
+        const p = at(k * split);
+        sternView(c, p.x, p.y, Math.max(0.9, r0 * lerp(1, kb / ka, k * split)), 0, "#5d6a58");
+      },
     });
-    later(s.ms * 0.8, () => {
-      const size = 44 * kb + 16;
-      for (let i = 0; i < s.slashes; i++) {
-        const tilt = -0.9 + i * (1.8 / Math.max(1, s.slashes - 1 || 1)) + (s.slashes === 1 ? 0.6 : 0);
-        void addEffect({
-          life: 0.22,
-          delay: i * 0.05,
-          draw: (c, k) => {
-            const e = easeOut(k);
-            c.globalCompositeOperation = "lighter";
-            c.translate(b.x, b.y);
-            c.rotate(tilt);
-            c.lineCap = "round";
-            const reach = size * 1.5;
-            const head = { x: lerp(-reach, reach, e), y: 0 };
-            const tail = { x: lerp(-reach, reach, Math.max(0, e - 0.55)), y: 0 };
-            line(c, tail, head, s.color, lerp(9, 2, k), 0.5 * (1 - k));
-            line(c, tail, head, "#ffffff", lerp(3.5, 1, k), 1 - k * k);
-          },
-        });
-      }
-    });
+    if (!s.split) {
+      setLanding(to, land);
+      return;
+    }
+    // The casing opens short of the target and scatters its bomblets across it.
+    const open = at(split);
+    flash(open.x, open.y, 10 * kb + 3, "#ffffff", 0.08);
+    smoke(open.x, open.y, 12 * kb + 3, "#c9ced6", 0.5, { alpha: 0.35 });
+    for (let i = 0; i < s.split; i++) {
+      const hull = hullPoint(to, 1.3) ?? land;
+      void addEffect({
+        life: (s.ms / 1000) * (1 - split) * rnd(0.9, 1.3),
+        delay: i * 0.02,
+        draw: (c, k) => {
+          c.fillStyle = "#2a2f36";
+          c.beginPath();
+          c.arc(lerp(open.x, hull.x, k), lerp(open.y, hull.y, k) - Math.sin(Math.PI * k) * 8 * kb, 1.4 * kb + 0.6, 0, TAU);
+          c.fill();
+        },
+        done: () => pop(hull, kb * 0.8),
+      });
+    }
+    setLanding(to, land);
+    await wait(s.ms * (1 - split));
+  },
+
+  ew(s, aim) {
+    const b = hullPoint(aim.to, 0.5) ?? aim.b;
+    const from = emitters(aim.from);
+    for (let i = 0; i < s.pulses; i++) from.forEach((o, n) => shimmer(o, b, (s.ms / 1000) * 1.2, i * 0.08 + n * 0.03, 3));
+    hullStatic(aim.to, 0.3, (s.ms / 1000) * 0.6);
+    setLanding(aim.to, b);
     return wait(s.ms);
   },
 };
 
 export const SHOT_KINDS = Object.keys(SHOTS) as Shot["fx"][];
 
-/** Fires one hit's worth of a shot and resolves when it reaches the target. */
-export function fireShot(shot: Shot, from: number, to: number, index = 0): Promise<void> {
+/**
+ * Fires one hit's worth of a shot from `from`'s own gun or pylons and resolves when it reaches the
+ * target. A `miss` is flown the same way but goes wide instead of landing.
+ */
+export function fireShot(shot: Shot, from: number, to: number, index = 0, miss = false): Promise<void> {
   const b = center(to);
   if (!b) return Promise.resolve();
-  if (reduced()) return wait(70);
+  if (reduced()) {
+    // The pylon still empties, so the loadout stays true to what was fired.
+    if (shot.fx === "missile") release(from, shot.store === "agm" ? ["agm", "bay"] : ["aam", "bay"]);
+    return wait(70);
+  }
   if (index === 0 || shot.sfx !== "brrt") sfx(shot.sfx);
-  const aim: Aim = { from, to, index, b, ka: depth(from), kb: depth(to) };
+  const aim: Aim = { from, to, index, b, ka: Math.max(0.35, depth(from)), kb: Math.max(0.3, depth(to)), miss };
   return (SHOTS[shot.fx] as (s: Shot, aim: Aim) => Promise<void>)(shot, aim);
 }
 
@@ -1374,105 +981,123 @@ export function fireShot(shot: Shot, from: number, to: number, index = 0): Promi
 
 const IMPACTS: Record<Impact["fx"], (p: Pt, k: number, color: string, dir: number, who: number) => void> = {
   sparks(p, k, color) {
-    flash(p.x, p.y, 22 * k + 6, color, 0.12);
-    sparks(p.x, p.y, { count: 9, color, speed: 300 * k + 80, life: 0.35, size: 1.8 });
-    void ring(p.x, p.y, 4, 30 * k + 8, color, 0.22, 2);
+    flash(p.x, p.y, 14 * k + 4, color, 0.1);
+    sparks(p.x, p.y, { count: 8, color, speed: 280 * k + 80, life: 0.3, size: 1.5, dir: Math.PI / 2, spread: 1.6 });
   },
-  blast(p, k, color) {
-    flash(p.x, p.y, 40 * k + 8, color, 0.16);
-    void ring(p.x, p.y, 8, 74 * k + 10, color, 0.34, 3.5);
-    sparks(p.x, p.y, { count: 14, color, speed: 380 * k + 80, life: 0.45, size: 2 });
-    for (let i = 0; i < 4; i++) smoke(p.x + rnd(-14, 14) * k, p.y + rnd(-10, 10) * k, 34 * k + 6, "#6b6f78", 0.8, { alpha: 0.45 });
-    for (let i = 0; i < 3; i++) glow(p.x + rnd(-12, 12) * k, p.y + rnd(-8, 8) * k, 16 * k + 4, C.flame, 0.3, 40 * k);
-  },
-  fireball(p, k, color) {
-    flash(p.x, p.y, 62 * k + 10, color, 0.2);
-    void ring(p.x, p.y, 10, 110 * k + 14, color, 0.42, 4.5);
-    void ring(p.x, p.y, 6, 70 * k + 10, "#ffffff", 0.3, 2, 0.06);
-    sparks(p.x, p.y, { count: 22, color, speed: 460 * k + 100, life: 0.55, size: 2.2 });
-    for (let i = 0; i < 6; i++) glow(p.x + rnd(-22, 22) * k, p.y + rnd(-16, 16) * k, 22 * k + 5, i % 2 ? C.flame : color, rnd(0.3, 0.5), 60 * k);
-    for (let i = 0; i < 7; i++) smoke(p.x + rnd(-24, 24) * k, p.y + rnd(-16, 16) * k, 46 * k + 8, "#35383f", 1.1, { alpha: 0.55, delay: 0.05 + Math.random() * 0.12 });
-    shards(p.x, p.y, 6, "#3d434c", 300 * k + 60, 6 * k + 2);
-  },
-  emp(p, k, color, _dir, who) {
-    flash(p.x, p.y, 30 * k + 6, color, 0.14);
-    void ring(p.x, p.y, 6, 90 * k + 12, color, 0.45, 3.5);
-    void ring(p.x, p.y, 6, 60 * k + 8, "#ffffff", 0.35, 1.5, 0.08);
-    for (let i = 0; i < 18; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const v = rnd(60, 260) * k;
-      emit({ kind: "dot", x: p.x, y: p.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, drag: 0.05, life: rnd(0.3, 0.6), size: rnd(1.5, 3), color, flicker: 0.8 });
-    }
-    const r = rectOf(who);
-    if (r) staticBars(r, color, 5, 0.3);
-  },
-  shrapnel(p, k, color) {
-    flash(p.x, p.y, 30 * k + 6, color, 0.12);
-    sparks(p.x, p.y, { count: 20, color, speed: 520 * k + 100, life: 0.4, size: 1.5, stretch: 0.03 });
-    for (let i = 0; i < 4; i++) {
-      const x = p.x + rnd(-40, 40) * k;
-      const y = p.y + rnd(-26, 26) * k;
-      later(40 + i * 45, () => {
-        flash(x, y, 16 * k + 4, color, 0.1);
-        sparks(x, y, { count: 4, color, speed: 200 * k + 60, life: 0.25, size: 1.3 });
-        smoke(x, y, 18 * k + 4, "#6b6f78", 0.5, { alpha: 0.35 });
+  shells(p, k, color, _dir, who) {
+    // Cannon strikes stitched across the skin, each kicking out sparks and a puff of smoke.
+    for (let i = 0; i < 3; i++) {
+      const q = i ? hullPoint(who, 0.7) ?? p : p;
+      later(i * 35, () => {
+        flash(q.x, q.y, 12 * k + 3, color, 0.08);
+        sparks(q.x, q.y, { count: 6, color, speed: 300 * k + 80, life: 0.3, size: 1.5, dir: Math.PI / 2, spread: 1.4, g: 320 });
+        smoke(q.x, q.y, 12 * k + 3, "#80868f", 0.5, { alpha: 0.32 });
       });
     }
-  },
-  slash(p, k, color, dir) {
-    flash(p.x, p.y, 24 * k + 6, "#ffffff", 0.1);
-    sparks(p.x, p.y, { count: 12, color, speed: 420 * k + 100, life: 0.3, size: 1.8, dir: dir + Math.PI / 2, spread: 0.5 });
-    sparks(p.x, p.y, { count: 6, color: "#ffffff", speed: 300 * k + 80, life: 0.25, size: 1.4, dir: dir - Math.PI / 2, spread: 0.5 });
-  },
-  glitch(p, k, color, _dir, who) {
-    flash(p.x, p.y, 20 * k + 6, color, 0.1);
-    sparks(p.x, p.y, { count: 6, color, speed: 260 * k + 60, life: 0.3, size: 1.6 });
-    const r = rectOf(who);
-    if (r) staticBars(r, color, 6, 0.32);
+    shards(p.x, p.y, 2, "#59626e", 220 * k + 40, 4 * k + 2);
   },
   pierce(p, k, color, dir) {
-    flash(p.x, p.y, 20 * k + 6, "#ffffff", 0.1);
-    sparks(p.x, p.y, { count: 14, color, speed: 620 * k + 140, life: 0.3, size: 2, dir, spread: 0.32, g: 80 });
-    sparks(p.x, p.y, { count: 5, color: "#ffffff", speed: 200 * k + 60, life: 0.25, size: 1.4, dir: dir + Math.PI, spread: 1 });
-    void ring(p.x, p.y, 3, 26 * k + 6, color, 0.2, 1.6);
-    smoke(p.x, p.y, 16 * k + 4, "#8a8f98", 0.5, { alpha: 0.35 });
+    // Rounds going clean through: sparks out of the far side along the line of fire.
+    flash(p.x, p.y, 14 * k + 4, "#ffffff", 0.08);
+    sparks(p.x, p.y, { count: 14, color, speed: 600 * k + 140, life: 0.3, size: 1.8, dir, spread: 0.34, g: 90 });
+    sparks(p.x, p.y, { count: 5, color: "#ffffff", speed: 200 * k + 60, life: 0.25, size: 1.3, dir: dir + Math.PI, spread: 1 });
+    shards(p.x, p.y, 3, "#59626e", 260 * k + 60, 5 * k + 2);
+    for (let i = 0; i < 2; i++) smoke(p.x, p.y, 15 * k + 4, "#6f757e", 0.6, { alpha: 0.4, delay: i * 0.05 });
+  },
+  blast(p, k, color) {
+    flash(p.x, p.y, 38 * k + 8, color, 0.14);
+    flash(p.x, p.y, 18 * k + 4, "#ffffff", 0.08);
+    sparks(p.x, p.y, { count: 14, color: "#ffd9a0", speed: 380 * k + 80, life: 0.42, size: 1.8 });
+    for (let i = 0; i < 4; i++) glow(p.x + rnd(-12, 12) * k, p.y + rnd(-8, 8) * k, 15 * k + 4, i % 2 ? FLAME : color, rnd(0.25, 0.4), 44 * k);
+    for (let i = 0; i < 5; i++) smoke(p.x + rnd(-14, 14) * k, p.y + rnd(-10, 10) * k, 30 * k + 6, "#4b4f57", 0.9, { alpha: 0.5, delay: 0.04 + Math.random() * 0.1 });
+    shards(p.x, p.y, 3, "#3d434c", 260 * k + 60, 5 * k + 2);
+  },
+  fireball(p, k, color) {
+    flash(p.x, p.y, 58 * k + 10, color, 0.18);
+    flash(p.x, p.y, 28 * k + 6, "#ffffff", 0.1);
+    sparks(p.x, p.y, { count: 22, color: "#ffd9a0", speed: 460 * k + 100, life: 0.55, size: 2 });
+    for (let i = 0; i < 7; i++) glow(p.x + rnd(-22, 22) * k, p.y + rnd(-16, 16) * k, 20 * k + 5, i % 2 ? FLAME : color, rnd(0.3, 0.5), 60 * k);
+    for (let i = 0; i < 8; i++) smoke(p.x + rnd(-24, 24) * k, p.y + rnd(-16, 16) * k, 42 * k + 8, "#2f3238", 1.15, { alpha: 0.58, delay: 0.05 + Math.random() * 0.14 });
+    shards(p.x, p.y, 7, "#3d434c", 320 * k + 60, 6 * k + 2);
+    later(130, () => pop({ x: p.x + rnd(-20, 20) * k, y: p.y + rnd(-12, 12) * k }, k));
+  },
+  shrapnel(p, k, color, _dir, who) {
+    flash(p.x, p.y, 22 * k + 5, color, 0.1);
+    sparks(p.x, p.y, { count: 16, color: "#ffd9a0", speed: 480 * k + 100, life: 0.36, size: 1.4, stretch: 0.03 });
+    for (let i = 0; i < 4; i++) {
+      const q = hullPoint(who, 1.3) ?? p;
+      later(40 + i * 45, () => pop(q, k * 0.7));
+    }
+  },
+  short(p, k, color, _dir, who) {
+    // Electronics letting go: arcs snapping across the skin, then smoke from inside.
+    hullStatic(who, 0.34);
+    for (let i = 0; i < 3; i++) {
+      const q = i ? hullPoint(who, 1) ?? p : p;
+      later(i * 70, () => {
+        flash(q.x, q.y, 9 * k + 3, color, 0.07);
+        sparks(q.x, q.y, { count: 5, color, speed: 200 * k + 60, life: 0.2, size: 1.2, stretch: 0.02, g: 0 });
+        void addEffect({
+          life: 0.12,
+          draw: (c, t) => {
+            c.globalCompositeOperation = "lighter";
+            c.globalAlpha = 1 - t;
+            c.strokeStyle = "#ffffff";
+            c.lineWidth = 1.2;
+            c.beginPath();
+            c.moveTo(q.x, q.y);
+            let x = q.x;
+            let y = q.y;
+            for (let n = 0; n < 4; n++) {
+              x += rnd(-9, 9) * k;
+              y += rnd(-7, 7) * k;
+              c.lineTo(x, y);
+            }
+            c.stroke();
+          },
+        });
+      });
+    }
+    for (let i = 0; i < 3; i++) smoke(p.x, p.y, 14 * k + 4, "#5a5f68", 0.8, { alpha: 0.4, vy: -30, delay: 0.15 + i * 0.07 });
   },
   embers(p, k, color) {
-    flash(p.x, p.y, 34 * k + 8, color, 0.16);
-    void ring(p.x, p.y, 6, 50 * k + 8, color, 0.3, 2.5);
-    for (let i = 0; i < 14; i++) {
-      emit({ kind: "glow", x: p.x + rnd(-18, 18) * k, y: p.y + rnd(-10, 10) * k, vx: rnd(-50, 50), vy: rnd(-140, -30), g: -60, drag: 0.4, life: rnd(0.5, 1), size: rnd(3, 6) * k + 1, color, flicker: 0.5, delay: Math.random() * 0.15 });
+    // Something inside is burning: flame licking out of the hull under a streamer of smoke.
+    flash(p.x, p.y, 18 * k + 5, color, 0.12);
+    for (let i = 0; i < 10; i++) {
+      emit({ kind: "glow", x: p.x + rnd(-12, 12) * k, y: p.y + rnd(-6, 6) * k, vx: rnd(-30, 30), vy: rnd(-90, -20), g: -50, drag: 0.4, life: rnd(0.4, 0.8), size: rnd(3, 6) * k + 1, color: i % 2 ? color : FIRE, flicker: 0.5, delay: Math.random() * 0.15 });
     }
-    for (let i = 0; i < 3; i++) smoke(p.x + rnd(-10, 10), p.y, 26 * k + 5, "#3a3d44", 0.9, { alpha: 0.45, vy: -40 });
+    for (let i = 0; i < 4; i++) smoke(p.x + rnd(-8, 8), p.y, 22 * k + 5, "#33363c", 0.95, { alpha: 0.48, vy: -36, delay: i * 0.06 });
   },
 };
 
 export const IMPACT_KINDS = Object.keys(IMPACTS) as Impact["fx"][];
 
-/** Plays an impact on a unit, scaled to how near the camera it is; `from` sets its direction. */
+/** Plays an impact on a unit's hull where the shot struck, scaled to how near the camera it is. */
 export function playImpact(impact: Impact, who: number, from: number, scale = 1) {
-  const p = center(who);
+  const p = landing(who, true) ?? hullPoint(who, 0.6) ?? center(who);
   if (!p || reduced()) return;
   const a = center(from);
-  const dir = a ? Math.atan2(p.y - a.y, p.x - a.x) : -Math.PI / 2;
-  const k = Math.max(0.45, Math.min(1.3, depth(who) * 1.15)) * scale;
-  IMPACTS[impact.fx]({ x: p.x + rnd(-10, 10) * k, y: p.y + rnd(-6, 6) * k }, k, impact.color, dir, who);
+  const dir = a && from !== who ? Math.atan2(p.y - a.y, p.x - a.x) : -Math.PI / 2;
+  IMPACTS[impact.fx](p, blastScale(who) * scale, impact.color, dir, who);
 }
 
 /* ------------------------------------------------------------ enemy fire */
 
-const ENEMY_SHOTS: Record<"tracer" | "missile" | "heavy", Shot> = {
-  tracer: { fx: "tracer", rounds: 5, gap: 40, spread: 12, color: "#ff8a5a", width: 2.6, origin: "nose", ms: 180, sfx: "cannon" },
-  missile: { fx: "missile", loft: 46, trail: "white", ms: 400, size: 1, rail: "both", flame: C.hot, sfx: "missile" },
-  heavy: { fx: "missile", loft: 100, trail: "dark", ms: 520, size: 1.5, rail: "both", flame: C.red, sfx: "heavy" },
+export type EnemyStyle = "tracer" | "missile" | "heavy";
+
+/** Enemies fire the same weapons the same way: their own gun's muzzle, their own pylons. */
+const ENEMY_SHOTS: Record<EnemyStyle, Shot> = {
+  tracer: { fx: "gun", rounds: 5, gap: 36, spread: 12, caliber: 1, ms: 180, sfx: "cannon" },
+  missile: { fx: "missile", store: "aam", size: 1, smoke: "white", loft: 40, ms: 420, sfx: "missile" },
+  heavy: { fx: "missile", store: "agm", size: 1.4, smoke: "grey", loft: 80, ms: 520, sfx: "heavy" },
 };
 
-export function enemyShot(style: "tracer" | "missile" | "heavy"): Shot {
+export function enemyShot(style: EnemyStyle): Shot {
   return ENEMY_SHOTS[style];
 }
 
-export const ENEMY_IMPACT: Record<"tracer" | "missile" | "heavy", Impact> = {
-  tracer: { fx: "sparks", color: "#ff8a5a" },
-  missile: { fx: "blast", color: C.hot },
-  heavy: { fx: "fireball", color: C.red },
+export const ENEMY_IMPACT: Record<EnemyStyle, Impact> = {
+  tracer: { fx: "shells", color: "#ffd9a0" },
+  missile: { fx: "blast", color: FIRE },
+  heavy: { fx: "fireball", color: FLAME },
 };

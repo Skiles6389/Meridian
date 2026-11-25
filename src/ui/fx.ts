@@ -2,12 +2,12 @@ import { sfx } from "../audio";
 import { PLAYER, type CombatFx } from "../game/combat";
 import { attitude, cubic, cubicTangent, flightView, mirrored, sixSpots, sizeAlong, swapIn, swapOut, type CamShape, type CamShot, type Curve, type FlightView, type Spot } from "./camera";
 import { C, cardAnim, type Impact, type Shot } from "./cardfx";
-import { ENEMY_IMPACT, enemyShot, fireShot, playImpact } from "./cardplay";
+import { deflect, ENEMY_IMPACT, enemyShot, fireShot, hullSheen, playImpact, type EnemyStyle } from "./cardplay";
 import { addEffect, emit, flash, freezeGfx, glow, initGfx, ring, setGfxRate, shards, smoke, sparks } from "./gfx";
-import { artEl, blastScale, center, depth, easeOut, initGeo, lerp, midOf, rectOf, rectOfSel, reduced, rnd, setTimeScale, timeScale, unitEl, wait, type Pt } from "./geo";
+import { artEl, blastScale, center, depth, easeOut, initGeo, lerp, marks, midOf, rectOf, rectOfSel, reduced, rnd, setTimeScale, timeScale, unitEl, wait, type Pt } from "./geo";
 
 export { wait, unitEl } from "./geo";
-export { castCard } from "./cardplay";
+export { castCard, rearmJet } from "./cardplay";
 
 let layer: HTMLElement;
 let svg: SVGSVGElement;
@@ -87,7 +87,7 @@ export function floatText(who: number, text: string, cls: string) {
   drop(el, 1500);
 }
 
-/** An explosion on the effects canvas: a spark hit, a blast, or a fireball. */
+/** An explosion on the effects canvas: a spark hit, a blast, or a fireball of flame, smoke and fragments. */
 export function burst(x: number, y: number, size: number, kind: "hit" | "boom" | "big" = "hit") {
   if (reduced() && kind === "hit") return;
   const k = size / 60;
@@ -98,7 +98,6 @@ export function burst(x: number, y: number, size: number, kind: "hit" | "boom" |
   }
   const big = kind === "big";
   flash(x, y, size * (big ? 0.9 : 0.7), big ? "#ffffff" : C.hot, big ? 0.22 : 0.16);
-  void ring(x, y, size * 0.1, size * (big ? 1.5 : 1.1), C.hot, big ? 0.5 : 0.36, big ? 5 : 3.5);
   sparks(x, y, { count: big ? 28 : 14, color: C.amber, speed: (big ? 300 : 240) * k + 120, life: big ? 0.65 : 0.45, size: 2.1 });
   for (let i = 0; i < (big ? 9 : 5); i++) {
     glow(x + rnd(-0.3, 0.3) * size, y + rnd(-0.22, 0.22) * size, size * rnd(0.22, 0.4), i % 2 ? C.flame : C.hot, rnd(0.3, 0.55), size * 0.8);
@@ -134,9 +133,9 @@ function recoil(who: number, from: number, hard: boolean) {
   art.animate([{ transform: "none" }, { transform: kick, offset: 0.18 }, { transform: back, offset: 0.6 }, { transform: "none" }], { duration: hard ? 420 : 320, easing: "cubic-bezier(.2,.8,.3,1)" });
 }
 
-/** A one-frame white pop on the airframe; the player's jet flashes red instead. */
+/** The airframe lit for a frame by the hit; the player's jet flashes red instead. */
 function hitFlash(who: number, hard: boolean) {
-  const peak = who === PLAYER ? "brightness(1.2) sepia(1) saturate(8) hue-rotate(-42deg)" : `brightness(${hard ? 3.4 : 2.6}) saturate(0)`;
+  const peak = who === PLAYER ? "brightness(1.2) sepia(1) saturate(8) hue-rotate(-42deg)" : `brightness(${hard ? 1.9 : 1.5}) saturate(0.6)`;
   for (const jet of artEl(who)?.querySelectorAll<HTMLElement>(".cj img") ?? []) {
     jet.animate([{ filter: "none" }, { filter: peak, offset: 0.12 }, { filter: "brightness(1.25)", offset: 0.4 }, { filter: "none" }], { duration: hard ? 300 : 220, easing: "ease-out" });
   }
@@ -189,8 +188,13 @@ function barrelRoll(who: number) {
   if (!art || reduced()) return;
   const dir = Math.random() < 0.5 ? -1 : 1;
   art.animate([{ rotate: "0deg" }, { rotate: `${dir * 360}deg` }], { duration: 560 * timeScale(), easing: "cubic-bezier(.45,.05,.35,1)" });
-  const c = center(who);
-  if (c) void ring(c.x, c.y, 8, 60 * blastScale(who), C.ice, 0.4, 2);
+  // Vapour off the wingtips as it rolls.
+  const k = Math.max(0.4, depth(who));
+  for (let i = 1; i < 9; i++) {
+    later(i * 56, () => {
+      for (const p of marks(who, "tip")) smoke(p.x, p.y, 6 * k, "#ffffff", 0.4, { alpha: 0.28, vx: 0, vy: 20 * k, grow: 14 * k });
+    });
+  }
 }
 
 /** A hard jink to one side, used when a shot is dodged. */
@@ -207,46 +211,10 @@ function jink(who: number) {
   if (r) for (let i = 0; i < 6; i++) smoke(r.left + r.width * (0.5 - dir * 0.4), r.top + r.height * 0.55 + i * 2, r.width * 0.05, "#ffffff", 0.4, { vx: -dir * rnd(40, 90), alpha: 0.4, delay: i * 0.015 });
 }
 
-/** A shield catching a hit: a bright arc on the side the fire came from, and a ring. */
-function shieldFlare(who: number, from: number) {
-  const r = rectOf(who);
-  const a = center(from);
-  if (!r || reduced()) return;
-  const p = midOf(r);
-  const ang = a ? Math.atan2(a.y - p.y, a.x - p.x) : Math.PI / 2;
-  const rx = r.width * 0.56;
-  const ry = Math.max(r.height * 0.8, r.width * 0.28);
-  void addEffect({
-    life: 0.34,
-    draw: (c, k) => {
-      c.globalCompositeOperation = "lighter";
-      c.strokeStyle = "#bff3ff";
-      c.lineCap = "round";
-      c.lineWidth = lerp(6, 1.5, k);
-      c.globalAlpha = (1 - k) ** 1.2;
-      c.beginPath();
-      c.ellipse(p.x, p.y, rx * (1 + k * 0.08), ry * (1 + k * 0.08), 0, ang - 1 + k * 0.2, ang + 1 - k * 0.2);
-      c.stroke();
-      c.strokeStyle = "#5fe3d6";
-      c.lineWidth = 1.5;
-      c.globalAlpha = (1 - k) * 0.6;
-      c.beginPath();
-      c.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
-      c.stroke();
-    },
-  });
-  sparks(p.x + Math.cos(ang) * rx, p.y + Math.sin(ang) * ry, { count: 6, color: "#bff3ff", speed: 220, life: 0.25, size: 1.5 });
-}
-
-/** A quick rising glow on a unit for a gain: shield, heal, or a buff. */
+/** A gain on a unit (shield, repair, a buff) shows as light sliding across its hull in the gain's colour. */
 function gainFx(who: number, color: string, plus = false) {
-  const r = rectOf(who);
-  if (!r || reduced()) return;
-  const p = midOf(r);
-  void ring(p.x, p.y, r.width * 0.25, r.width * 0.62, color, 0.4, 2.5);
-  for (let i = 0; i < (plus ? 9 : 5); i++) {
-    emit({ kind: plus ? "glow" : "dot", x: r.left + r.width * rnd(0.2, 0.8), y: r.top + r.height * rnd(0.3, 0.8), vy: rnd(-110, -50), life: rnd(0.4, 0.7), size: plus ? rnd(3, 5) : rnd(1.6, 3), color, flicker: 0.4, delay: Math.random() * 0.12 });
-  }
+  if (reduced()) return;
+  hullSheen(who, color, plus ? 0.6 : 0.45, plus ? 0.75 : 0.55);
 }
 
 /**
@@ -565,7 +533,6 @@ async function shootDown(who: number, pendingDown: Set<number>) {
   if (c) {
     flashScreen();
     burst(c.x, c.y, 130 * k, "big");
-    void ring(c.x, c.y, 10, 220 * k, "#ffffff", 0.5, 4, 0.04);
     shards(c.x, c.y, 16, "#3d434c", 380 * k + 80, 9 * k + 3);
     shards(c.x, c.y, 6, C.flame, 300 * k + 60, 5 * k + 2);
     later(150, () => burst(c.x + 40 * k, c.y - 18 * k, 70 * k, "boom"));
@@ -688,11 +655,9 @@ export interface PlayContext {
   pendingDown: Set<number>;
 }
 
-/** Shot and impact for the player's damage that does not come from a card's own shot. */
-const PASSIVE_SHOT: Shot = { fx: "bolt", color: C.radar, forks: 1, ms: 200, sfx: "zap" };
-const PASSIVE_IMPACT: Impact = { fx: "sparks", color: C.radar };
-
-type EnemyStyle = "tracer" | "missile" | "heavy";
+/** Shot and impact for the player's damage that does not come from a card's own shot: a snap burst from the gun. */
+const PASSIVE_SHOT: Shot = { fx: "gun", rounds: 3, gap: 30, spread: 8, caliber: 1, ms: 150, sfx: "cannon" };
+const PASSIVE_IMPACT: Impact = { fx: "sparks", color: "#ffd9a0" };
 
 function enemyStyle(amount: number, index: number): EnemyStyle {
   if (amount >= 14) return "heavy";
@@ -750,7 +715,7 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       const crit = event.amount >= 15;
       ctx.bars.set(event.who, { hp: event.hp, shield: event.shield });
       setBar(event.who, event.hp, event.shield);
-      if (event.blocked > 0) shieldFlare(event.who, event.from);
+      if (event.blocked > 0) deflect(event.who, event.from);
       if (event.amount > 0) {
         playImpact(impact, event.who, event.from, heavy ? 1.2 : 1);
         recoil(event.who, event.from, heavy);
@@ -771,9 +736,9 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
         sfx("block");
       }
       if (event.blocked > 0 && event.amount > 0) pulseShield(event.who);
-      await wait(shotOf.fx === "tracer" && event.from === PLAYER ? 50 : 100);
+      await wait(shotOf.fx === "gun" && event.from === PLAYER ? 50 : 100);
     } else if (event.t === "evade") {
-      const dodge = fireShot(enemyShot("missile"), event.from, event.who, volley);
+      const dodge = fireShot(enemyShot("missile"), event.from, event.who, volley, true);
       later(180, () => jink(event.who));
       await dodge;
       floatText(event.who, "Evaded", "evade");
@@ -842,7 +807,6 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       const c = center(event.uid);
       if (c) {
         burst(c.x, c.y, 90, "boom");
-        void ring(c.x, c.y, 20, 240, C.red, 0.6, 5);
       }
       sfx("boss");
       shake(6);
@@ -901,8 +865,8 @@ function ghost(snap: CardSnap): HTMLElement {
 }
 
 /**
- * The played card lifts out of the hand, flares in its type's colour, and pours into the player's
- * jet as a stream of sparks. A card that exhausts burns away from the bottom up instead.
+ * The played card lifts out of the hand, flares in its type's colour, and is flicked towards the
+ * player's jet, where it breaks up. A card that exhausts burns away from the bottom up instead.
  */
 export function throwCard(snap: CardSnap, type: string, exhaust: boolean) {
   sfx("play");
@@ -956,20 +920,11 @@ export function throwCard(snap: CardSnap, type: string, exhaust: boolean) {
   drop(el, 330 * speed + 40);
   later(130, () => {
     const o = { x: from.x, y: from.y - lift };
-    flash(o.x, o.y, r.width * 0.55, tint, 0.14);
-    const n = 12;
-    for (let i = 0; i < n; i++) {
+    flash(o.x, o.y, r.width * 0.5, tint, 0.14);
+    for (let i = 0; i < 10; i++) {
       const a = { x: o.x + rnd(-0.4, 0.4) * r.width, y: o.y + rnd(-0.4, 0.4) * r.height };
-      const life = rnd(0.16, 0.26);
-      emit({ kind: "spark", x: a.x, y: a.y, vx: (jet.x - a.x) / life, vy: (jet.y - a.y) / life, g: 0, life, size: rnd(1.6, 2.8), color: i % 3 ? tint : "#ffffff", stretch: 0.05, delay: i * 0.008 });
+      emit({ kind: "dot", x: a.x, y: a.y, vx: (jet.x - a.x) * 0.5, vy: (jet.y - a.y) * 0.5 - 40, g: 0, drag: 0.1, life: rnd(0.16, 0.3), size: rnd(1.4, 2.4), color: i % 3 ? tint : "#ffffff", flicker: 0.4 });
     }
-  });
-  later(300, () => {
-    const p = center(PLAYER);
-    const jr = rectOf(PLAYER);
-    if (!p || !jr) return;
-    glow(p.x, p.y, jr.width * 0.34, tint, 0.26, 0, 0.7);
-    void ring(p.x, p.y, jr.width * 0.12, jr.width * 0.5, tint, 0.3, 2.5);
   });
 }
 
