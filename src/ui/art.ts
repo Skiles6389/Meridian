@@ -1,3 +1,4 @@
+import chaseMeta from "../assets/art/chase.json";
 import jetMeta from "../assets/art/jets.json";
 import type { ActId, Livery, SilhouetteId } from "../game/types";
 
@@ -36,6 +37,58 @@ export function jetArt(id: SilhouetteId, opts: { flip?: boolean; livery?: Livery
   const src = JET_ART[id] ?? "";
   const classes = ["jet", opts.flip ? "flip" : "", opts.livery ? `livery-${opts.livery}` : "", opts.cls ?? ""].filter(Boolean).join(" ");
   return `<div class="${classes}" style="--ar:${meta.aspect};--nx:${(meta.nozzle[0] * 100).toFixed(1)}%;--ny:${(meta.nozzle[1] * 100).toFixed(1)}%"><div class="jet-body"><i class="burner"></i><img src="${src}" alt="" draggable="false" decoding="async" /></div></div>`;
+}
+
+const chaseFiles = import.meta.glob("../assets/art/chase/*.webp", { eager: true, import: "default" }) as Record<string, string>;
+export const CHASE_ART = byName(chaseFiles);
+
+interface ChaseMeta {
+  aspect: number;
+  /** Lit exhausts on rear views, as [x, y, radius] fractions of the sprite. */
+  nozzles: [number, number, number][];
+}
+
+const CHASE_META = chaseMeta as unknown as Record<string, ChaseMeta>;
+
+export type ChaseView = "rear" | "front";
+
+/** The three Tornado variants share one airframe in the chase views; their paint comes from a livery tint. */
+const CHASE_BODY: Partial<Record<SilhouetteId, string>> = {
+  tornado_ids: "tornado",
+  tornado_ecr: "tornado",
+  tornado_marine: "tornado",
+};
+
+const CHASE_TINT: Partial<Record<SilhouetteId, Livery>> = {
+  tornado_ecr: "steel",
+  tornado_marine: "storm",
+};
+
+function chaseName(id: SilhouetteId, view: ChaseView): string {
+  return `${CHASE_BODY[id] ?? id}-${view}`;
+}
+
+export function hasChaseArt(id: SilhouetteId, view: ChaseView): boolean {
+  const name = chaseName(id, view);
+  return !!CHASE_ART[name] && !!CHASE_META[name];
+}
+
+/** Width over height of a chase-view sprite. */
+export function chaseAspect(id: SilhouetteId, view: ChaseView): number {
+  return CHASE_META[chaseName(id, view)]?.aspect ?? 2.4;
+}
+
+/** One chase-camera sprite. Rear views carry an afterburner flicker over each lit nozzle. */
+
+export function chaseArt(id: SilhouetteId, view: ChaseView, opts: { livery?: Livery; flip?: boolean; cls?: string } = {}): string {
+  const name = chaseName(id, view);
+  const meta = CHASE_META[name] ?? { aspect: 2.4, nozzles: [] };
+  const livery = opts.livery || CHASE_TINT[id];
+  const classes = ["cj", `cj-${view}`, opts.flip ? "flip" : "", livery ? `livery-${livery}` : "", opts.cls ?? ""].filter(Boolean).join(" ");
+  const glows = meta.nozzles
+    .map(([x, y, r]) => `<i class="cj-glow" style="--gx:${(x * 100).toFixed(1)}%;--gy:${(y * 100).toFixed(1)}%;--gr:${Math.max(r * 100, 1.6).toFixed(1)}%"></i>`)
+    .join("");
+  return `<div class="${classes}" style="--ar:${meta.aspect}"><img src="${CHASE_ART[name] ?? ""}" alt="" draggable="false" decoding="async" />${glows}</div>`;
 }
 
 export type CardTheme =
@@ -172,3 +225,6 @@ export function eventArt(id: string): string {
 }
 
 export const ACT_SCENE: Record<ActId, string> = { 1: "act1", 2: "act2", 3: "act3" };
+
+/** Backdrop behind a fight: the act's sky with its ground far below, seen from the chase camera. */
+export const CHASE_SCENE: Record<ActId, string> = { 1: "chase-act1", 2: "chase-act2", 3: "chase-act3" };

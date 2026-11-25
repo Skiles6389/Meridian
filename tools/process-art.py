@@ -2,7 +2,8 @@
 
 Usage: python3 tools/process-art.py <raw-dir>
 
-Raw jets are painted on flat magenta and keyed out here. Clouds are painted on
+Raw jets (side views, plus the rear and front-quarter chase-camera views) are
+painted on flat magenta and keyed out here. Clouds are painted on
 black and composited in the browser with `mix-blend-mode: screen`. Everything
 else is resized and compressed. Jet anchors (nozzle position, bounding box) are
 written to src/assets/art/jets.json for the renderer.
@@ -88,6 +89,82 @@ def process_jets(src: Path) -> dict:
     return meta
 
 
+PLAYER_CAMS = ["f16", "f15e", "f22", "ea18g", "a10"]
+FOE_CAMS = [
+    "f104", "alphajet", "f4f", "mig29", "tornado", "typhoon", "f35",
+    "f4f_boss", "typhoon_boss", "f35_boss",
+]
+
+# Rear views whose livery fools the glow finder, as [x, y, r] fractions of the cropped sprite.
+CHASE_NOZZLES = {
+    "f4f_boss-rear": [[0.4369, 0.8655, 0.0151], [0.5631, 0.8655, 0.0151]],
+    "typhoon_boss-rear": [[0.4447, 0.925, 0.02], [0.558, 0.925, 0.02]],
+}
+
+
+def glow_blobs(rgba: Image.Image) -> list:
+    """Finds the lit exhausts in a rear view: hot orange or blue-white blobs, as [x, y, r] fractions."""
+    small = rgba.resize((rgba.width // 4, rgba.height // 4), Image.BILINEAR)
+    a = np.asarray(small).astype(np.int32)
+    r, g, b, alpha = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
+    hot = (r > 205) & (g > 95) & (b < 150) & (r - b > 80)
+    cold = (b > 205) & (g > 150) & (r < 175)
+    white = (r > 245) & (g > 225) & (b > 190)
+    mask = (hot | cold | white) & (alpha > 200)
+    h, w = mask.shape
+    seen = np.zeros_like(mask)
+    blobs = []
+    for y0 in range(h):
+        for x0 in range(w):
+            if not mask[y0, x0] or seen[y0, x0]:
+                continue
+            stack = [(y0, x0)]
+            seen[y0, x0] = True
+            pts = []
+            while stack:
+                y, x = stack.pop()
+                pts.append((y, x))
+                for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+            if len(pts) >= max(6, h * w * 0.0012):
+                ys = np.array([p[0] for p in pts])
+                xs = np.array([p[1] for p in pts])
+                blobs.append((len(pts), xs.mean(), ys.mean()))
+    blobs.sort(reverse=True)
+    out = []
+    for area, cx, cy in blobs[:2]:
+        if out and area < blobs[0][0] * 0.35:
+            break
+        out.append([round(cx / w, 4), round(cy / h, 4), round(float(np.sqrt(area / np.pi)) / w, 4)])
+    return sorted(out)
+
+
+def process_chase(src: Path) -> dict:
+    """Rear (chase-camera) and front-quarter (attacking) views for the battle stage."""
+    meta = {}
+    (OUT / "chase").mkdir(parents=True, exist_ok=True)
+    jobs = [(f"cam_{j}.jpg", f"{j}-rear", 720, True) for j in PLAYER_CAMS]
+    for foe in FOE_CAMS:
+        jobs.append((f"rear_{foe}.jpg", f"{foe}-rear", 560, True))
+        jobs.append((f"front_{foe}.jpg", f"{foe}-front", 560, False))
+    for name, out, width, rear in jobs:
+        raw = Image.open(src / name)
+        keyed = key_magenta(raw)
+        alpha = np.asarray(keyed)[..., 3]
+        ys, xs = np.where(alpha > 26)
+        pad = 8
+        x0, x1 = max(0, xs.min() - pad), min(raw.width, xs.max() + pad)
+        y0, y1 = max(0, ys.min() - pad), min(raw.height, ys.max() + pad)
+        crop = keyed.crop((x0, y0, x1, y1))
+        final = resize_rgba(crop, width)
+        final.save(OUT / "chase" / f"{out}.webp", "WEBP", quality=78, method=6)
+        meta[out] = {"aspect": round(crop.width / crop.height, 4), "nozzles": CHASE_NOZZLES.get(out) or (glow_blobs(crop) if rear else [])}
+    return meta
+
+
 def save_rgb(src: Path, name: str, out: str, width: int, quality: int):
     img = Image.open(src / name).convert("RGB")
     height = round(img.height * width / img.width)
@@ -101,8 +178,12 @@ def main():
     src = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/artsrc")
     meta = process_jets(src)
     (OUT / "jets.json").write_text(json.dumps(meta, indent=2) + "\n")
+    chase = process_chase(src)
+    (OUT / "chase.json").write_text(json.dumps(chase, indent=2) + "\n")
     for name in ["act1", "act2", "act3", "hangar", "shop"]:
         save_rgb(src, f"bg_{name}.jpg", f"scenes/{name}.webp", 1280, 62)
+    for act in ["act1", "act2", "act3"]:
+        save_rgb(src, f"bg_chase_{act}.jpg", f"scenes/chase-{act}.webp", 1440, 60)
     for name in ["act1", "act2", "act3"]:
         save_rgb(src, f"fog_{name}.jpg", f"scenes/fog-{name}.webp", 960, 58)
     save_rgb(src, "map_paper.jpg", "scenes/chart.webp", 720, 60)
