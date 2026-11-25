@@ -14,6 +14,7 @@ import type { CardDef, Fighter, MapNode, NodeType, Plan, RunState, Status } from
 import { spentStations } from "./loadout";
 import { ACT_SCENE, CHASE_SCENE, SCENE_ART, cardArt, chaseArt, chaseAspect, eventArt, jetArt } from "./art";
 import { allySpot, foeSpots, type CamShape, type Spot } from "./camera";
+import { swayStyle } from "./flight";
 import { icon, nodeIcon, relicIcon } from "./icons";
 import type { AppState } from "./model";
 
@@ -741,7 +742,7 @@ function battle(app: AppState): string {
         <div class="contact-tag"><span>${esc(combat.encounterName)}</span><b>Turn ${combat.turn}</b></div>
         <div class="foes">${foes}</div>
         <div class="ally" data-who="-1" style="${spotVars("c", allySpot(shape, "close"))};${spotVars("w", allySpot(shape, "wide"))}">
-          <div class="unit-art">${chaseArt(jet.silhouette, "rear", { cls: "player", spent: spentStations(PLAYER) })}</div>
+          <div class="unit-art" style="${swayStyle()}">${chaseArt(jet.silhouette, "rear", { cls: "player", spent: spentStations(PLAYER) })}</div>
         </div>
         <div class="pilot">
           <div class="nameplate"><b>${esc(jet.callsign)}</b><small>${esc(jet.code)} ${esc(jet.name)}</small></div>

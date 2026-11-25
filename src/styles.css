@@ -405,97 +405,32 @@ button {
   background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.6));
 }
 
-/* Chase camera backdrop: the sky zooms with the battle camera and rushes outward. */
+/*
+ * Chase camera backdrop. The flight renderer's canvas covers the act's still painting once it has
+ * drawn a frame; the painting is what shows where WebGL is not available.
+ */
 .sc-chase .sc-sky {
-  scale: 1.14;
-  transition: translate 0.8s ease-out, scale 1s cubic-bezier(0.62, 0.02, 0.28, 1);
-  animation: chase-drift 26s ease-in-out infinite alternate;
+  inset: 0;
+  translate: none;
+  animation: none;
 }
 
-html[data-cam="wide"] .sc-chase .sc-sky {
-  scale: 1.02;
-}
-
-@keyframes chase-drift {
-  from {
-    transform: rotate(-1.2deg);
-  }
-  to {
-    transform: rotate(1.2deg) translateY(-1.5%);
-  }
-}
-
-.sc-wisps,
-.sc-rush {
+.sc-flight-slot {
   position: absolute;
   inset: 0;
-  overflow: hidden;
 }
 
-.wisp {
+.sc-flight {
   position: absolute;
-  left: 50%;
-  top: 46%;
-  width: calc(var(--s) * 34vmax);
-  height: calc(var(--s) * 9vmax);
-  border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(235, 242, 250, 0.55), rgba(235, 242, 250, 0.18) 60%, transparent);
-  filter: blur(6px);
+  inset: 0;
+  width: 100%;
+  height: 100%;
   opacity: 0;
-  animation: wisp var(--t) cubic-bezier(0.55, 0, 0.9, 0.5) var(--d) infinite;
+  transition: opacity 0.35s ease;
 }
 
-@keyframes wisp {
-  0% {
-    transform: translate(-50%, -50%) translate(calc(var(--x) * 0.1), calc(var(--y) * 0.1)) scale(0.12);
-    opacity: 0;
-  }
-  25% {
-    opacity: 0.8;
-  }
-  100% {
-    transform: translate(-50%, -50%) translate(calc(var(--x) * 2.4), calc(var(--y) * 1.8)) scale(1.6);
-    opacity: 0;
-  }
-}
-
-.sc-act2 .wisp,
-.sc-chase-act2 .wisp {
-  background: radial-gradient(closest-side, rgba(250, 214, 170, 0.45), rgba(240, 180, 130, 0.14) 60%, transparent);
-}
-
-.sc-chase-act3 .wisp {
-  background: radial-gradient(closest-side, rgba(190, 210, 255, 0.3), rgba(160, 190, 255, 0.1) 60%, transparent);
-}
-
-.rush {
-  position: absolute;
-  left: 50%;
-  top: 44%;
-  width: calc(var(--s) * 18vmax);
-  height: 2px;
-  transform-origin: 0 50%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55));
-  opacity: 0;
-  animation: rush var(--t) linear var(--d) infinite;
-}
-
-@keyframes rush {
-  0% {
-    transform: rotate(var(--a)) translateX(8vmax) scaleX(0.2);
-    opacity: 0;
-  }
-  30% {
-    opacity: 0.7;
-  }
-  100% {
-    transform: rotate(var(--a)) translateX(70vmax) scaleX(1.4);
-    opacity: 0;
-  }
-}
-
-html[data-cam="wide"] .rush {
-  animation-duration: calc(var(--t) * 1.6);
+.sc-flight.on {
+  opacity: 1;
 }
 
 /* ------------------------------------------------------------- buttons */

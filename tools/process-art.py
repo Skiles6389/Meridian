@@ -205,6 +205,25 @@ def save_rgb(src: Path, name: str, out: str, width: int, quality: int):
     img.save(path, "WEBP", quality=quality, method=6)
 
 
+def tileable(img: Image.Image) -> Image.Image:
+    """Cross-fades a picture into a half-shifted copy of itself towards its edges, so it repeats without a seam."""
+    a = np.asarray(img).astype(np.float32)
+    h, w, _ = a.shape
+    shifted = np.roll(np.roll(a, h // 2, 0), w // 2, 1)
+    edge = np.maximum(np.abs(np.linspace(-1, 1, h))[:, None], np.abs(np.linspace(-1, 1, w))[None, :])
+    keep = np.clip((1 - edge) / 0.3, 0, 1)
+    keep = (keep * keep * (3 - 2 * keep))[..., None]
+    return Image.fromarray(np.clip(a * keep + shifted * (1 - keep), 0, 255).astype(np.uint8), "RGB")
+
+
+def save_square(src: Path, name: str, out: str, size: int, quality: int):
+    """A ground texture for the flight backdrop: square and seamless, so the renderer can tile it."""
+    img = tileable(Image.open(src / name).convert("RGB").resize((size, size), Image.LANCZOS))
+    path = OUT / out
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path, "WEBP", quality=quality, method=6)
+
+
 def main():
     src = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/artsrc")
     meta = process_jets(src)
@@ -215,6 +234,8 @@ def main():
         save_rgb(src, f"bg_{name}.jpg", f"scenes/{name}.webp", 1280, 62)
     for act in ["act1", "act2", "act3"]:
         save_rgb(src, f"bg_chase_{act}.jpg", f"scenes/chase-{act}.webp", 1440, 60)
+    for act in ["act1", "act2", "act3"]:
+        save_square(src, f"ground_{act}.jpg", f"scenes/ground-{act}.webp", 1024, 62)
     for name in ["act1", "act2", "act3"]:
         save_rgb(src, f"fog_{name}.jpg", f"scenes/fog-{name}.webp", 960, 58)
     save_rgb(src, "map_paper.jpg", "scenes/chart.webp", 720, 60)

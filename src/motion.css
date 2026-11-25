@@ -1648,70 +1648,6 @@
 
 /* ------------------------------------------------------------ ambient sky */
 
-/* Two banks of cloud sliding past at different depths, under the chase camera. */
-.sc-banks {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.bank {
-  position: absolute;
-  left: -60%;
-  width: 220%;
-  height: 26%;
-  background-repeat: repeat-x;
-  background-size: 50% 100%;
-  will-change: transform;
-}
-
-.bank.far {
-  top: 50%;
-  opacity: 0.5;
-  background-image:
-    radial-gradient(18% 60% at 12% 60%, rgba(255, 255, 255, 0.5), transparent 70%),
-    radial-gradient(22% 70% at 38% 50%, rgba(255, 255, 255, 0.42), transparent 70%),
-    radial-gradient(16% 50% at 62% 64%, rgba(255, 255, 255, 0.46), transparent 70%),
-    radial-gradient(20% 66% at 86% 52%, rgba(255, 255, 255, 0.4), transparent 70%);
-  animation: bank-drift 90s linear infinite;
-}
-
-.bank.near {
-  top: 70%;
-  height: 40%;
-  opacity: 0.6;
-  background-image:
-    radial-gradient(22% 60% at 8% 70%, rgba(255, 255, 255, 0.55), transparent 70%),
-    radial-gradient(26% 72% at 44% 62%, rgba(255, 255, 255, 0.5), transparent 70%),
-    radial-gradient(20% 56% at 78% 74%, rgba(255, 255, 255, 0.52), transparent 70%);
-  animation: bank-drift 46s linear infinite;
-}
-
-.sc-chase-act2 .bank {
-  filter: sepia(0.5) hue-rotate(-12deg) saturate(1.6);
-}
-
-.sc-chase-act3 .bank {
-  opacity: 0.28;
-  filter: hue-rotate(190deg) saturate(1.4) brightness(0.8);
-}
-
-@keyframes bank-drift {
-  to {
-    transform: translateX(50%);
-  }
-}
-
-html[data-cam="wide"] .sc-banks {
-  scale: 0.94;
-  translate: 0 2%;
-}
-
-.sc-banks {
-  transition: scale 0.9s var(--ease-inout), translate 0.9s var(--ease-inout);
-}
-
 /* The stage breathes very slightly, as if the chase plane were riding the air too. */
 .cam-hud {
   animation: hud-float 6.5s ease-in-out infinite;
@@ -1731,7 +1667,6 @@ html[data-cam="wide"] .sc-banks {
   *::after {
     animation-delay: 0s !important;
   }
-  .bank,
   .cam-hud {
     animation: none !important;
   }
