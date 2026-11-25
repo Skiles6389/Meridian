@@ -15,7 +15,7 @@ import { sfx } from "../audio";
 import { PLAYER } from "../game/combat";
 import { demiseLength, demisePlan, explosionAt, fallPose, landingSpot, pickDemise, pieceCentre, wreckPieces, type Cause, type Demise, type DemisePlan, type Landing } from "./crashplan";
 import { groundSurface, groundTrack, horizonY, type GroundPoint } from "./flight";
-import { addEffect } from "./gfx";
+import { addEffect, fitCanvas } from "./gfx";
 import { center, easeOut, lerp, rectOf, reduced, rnd, spriteEl, unitEl, wait, type Pt } from "./geo";
 
 /** The fight's own effects, lent by `fx.ts` so the two files do not import each other. */
@@ -404,7 +404,6 @@ interface Scene {
 const scenes: Scene[] = [];
 let world: HTMLCanvasElement | null = null;
 let worldCtx: CanvasRenderingContext2D | null = null;
-let worldScale = 1;
 let painted = -1;
 
 /** The canvas over the fight's moving backdrop, moved into whichever backdrop is up now. */
@@ -419,15 +418,6 @@ function backdrop(): CanvasRenderingContext2D | null {
   if (slot && world.parentElement !== slot) slot.appendChild(world);
   // Once the fight's backdrop is on its way out, what is left of a crash fades out with it.
   if (!world.isConnected) return null;
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  worldScale = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(1_800_000 / Math.max(1, w * h)));
-  const bw = Math.round(w * worldScale);
-  const bh = Math.round(h * worldScale);
-  if (world.width !== bw || world.height !== bh) {
-    world.width = bw;
-    world.height = bh;
-  }
   return worldCtx;
 }
 
@@ -439,8 +429,8 @@ function paintWorld(force = false): boolean {
   const now = performance.now();
   if (!force && now - painted < 3) return true;
   painted = now;
-  c.setTransform(worldScale, 0, 0, worldScale, 0, 0);
-  c.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  // Measured where it is shown, like the effects canvas, so the ground and the sky above it line up.
+  fitCanvas(world!, c, 1_800_000);
   for (const scene of scenes) {
     if (!scene.world) continue;
     c.save();

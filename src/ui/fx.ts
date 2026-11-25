@@ -28,9 +28,7 @@ export function initFx(appRoot: HTMLElement) {
   svg.classList.add("fx-svg");
   layer.appendChild(svg);
   document.body.appendChild(layer);
-  const resize = () => svg.setAttribute("viewBox", `0 0 ${window.innerWidth} ${window.innerHeight}`);
-  resize();
-  window.addEventListener("resize", resize);
+  // No viewBox: the layer's own CSS pixels are its units, so client coordinates land where they should on any screen.
   initWreck({ hitStop, shake, flashScreen, burst });
 }
 

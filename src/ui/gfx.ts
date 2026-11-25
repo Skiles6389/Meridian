@@ -32,6 +32,8 @@ export interface Particle {
   flicker: number;
   /** Seconds before the particle appears. */
   delay: number;
+  /** Set once the particle has had a frame at its starting point. */
+  born: boolean;
 }
 
 export type ParticleInit = Partial<Particle> & { x: number; y: number };
@@ -47,6 +49,8 @@ export interface Effect {
 
 interface LiveEffect extends Effect {
   age: number;
+  /** Set once the effect has been drawn at the very start of its life. */
+  born: boolean;
 }
 
 /** Hard cap so a pile-up of effects can never drag the frame rate down. */
@@ -58,7 +62,6 @@ const effects: LiveEffect[] = [];
 
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
-let scale = 1;
 let running = false;
 let last = 0;
 let rate = 1;
@@ -81,6 +84,7 @@ const DEFAULTS: Omit<Particle, "x" | "y"> = {
   stretch: 0.03,
   flicker: 0,
   delay: 0,
+  born: false,
 };
 
 export function emit(init: ParticleInit) {
@@ -98,7 +102,7 @@ export function emit(init: ParticleInit) {
 export function addEffect(effect: Effect): Promise<void> {
   return new Promise((resolve) => {
     const done = effect.done;
-    effects.push({ ...effect, age: -(effect.delay ?? 0), done: () => (done?.(), resolve()) });
+    effects.push({ ...effect, age: effect.delay ? -effect.delay : 0, born: false, done: () => (done?.(), resolve()) });
     kick();
     if (!canvas) {
       // No canvas (tests, or before init): settle on a timer so awaiting callers still move on.
@@ -115,13 +119,24 @@ export function effectCount(): number {
   return effects.length;
 }
 
-/** Advances every particle by `dt` seconds and retires the dead ones. */
+/**
+ * Advances every particle by `dt` seconds and retires the dead ones.
+ *
+ * A particle's first frame is always spent where it was emitted, however long that frame took: a
+ * flash is seen on the muzzle it came from even when the frame rate drops, instead of being moved on
+ * or burnt out before it was ever drawn.
+ */
 export function stepParticles(dt: number) {
   let keep = 0;
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
     if (p.delay > 0) {
       p.delay -= dt;
+      particles[keep++] = p;
+      continue;
+    }
+    if (!p.born) {
+      p.born = true;
       particles[keep++] = p;
       continue;
     }
@@ -145,12 +160,29 @@ export function stepParticles(dt: number) {
   particles.length = keep;
 }
 
-function stepEffects(dt: number) {
+/**
+ * One frame of the drawn effects: advances them by `dt` seconds, draws each one that is due on `c`,
+ * and retires those that have finished.
+ *
+ * An effect is always drawn at both ends of its life, however long the frames run. Its clock is
+ * held at zero until it has been drawn once, so a round is first seen at the muzzle and a missile
+ * on its rail; and it is held at the end until that has been drawn too, so the round is seen
+ * reaching its target. A dropped frame can only shorten the middle.
+ */
+export function playEffects(dt: number, c: CanvasRenderingContext2D) {
+  for (const e of effects) e.age = e.born ? Math.min(e.life, e.age + dt) : Math.min(0, e.age + dt);
+  // Effects added while drawing join the same frame, so a flash started by a round shows with it.
+  for (const e of effects) {
+    if (e.age < 0) continue;
+    e.born = true;
+    c.save();
+    e.draw(c, e.life > 0 ? Math.min(1, e.age / e.life) : 1, e.age);
+    c.restore();
+  }
   let keep = 0;
   for (let i = 0; i < effects.length; i++) {
     const e = effects[i];
-    e.age += dt;
-    if (e.age >= e.life) {
+    if (e.born && e.age >= e.life) {
       e.done?.();
       continue;
     }
@@ -205,22 +237,58 @@ export function fxSprite(kind: "glow" | "smoke", color: string): HTMLCanvasEleme
   return s;
 }
 
+export interface Fit {
+  /** Backing-store pixels per CSS pixel, across and down. */
+  sx: number;
+  sy: number;
+  /** The canvas's box on screen, in client coordinates. */
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  /** The backing store the box needs. */
+  pixelsWide: number;
+  pixelsHigh: number;
+}
+
+/**
+ * How a canvas shown in `box` must be sized and transformed so that drawing at a client coordinate
+ * (the kind getBoundingClientRect returns) lands on that very point of the screen. `budget` caps
+ * the backing store in pixels: soft glows do not need retina sharpness.
+ */
+export function fitBox(box: { left: number; top: number; width: number; height: number }, dpr: number, budget: number): Fit {
+  const width = Math.max(1, box.width);
+  const height = Math.max(1, box.height);
+  const scale = Math.min(dpr || 1, 2, Math.sqrt(budget / (width * height)));
+  const pixelsWide = Math.max(1, Math.round(width * scale));
+  const pixelsHigh = Math.max(1, Math.round(height * scale));
+  return { sx: pixelsWide / width, sy: pixelsHigh / height, left: box.left, top: box.top, width, height, pixelsWide, pixelsHigh };
+}
+
+/**
+ * Lines a full-screen canvas up with the page for this frame and clears it. The canvas is measured
+ * where it is actually shown rather than assumed to match the window: a phone browser's toolbars,
+ * a zoomed page or a layer that is offset would otherwise shift every effect away from the jets.
+ */
+export function fitCanvas(target: HTMLCanvasElement, c: CanvasRenderingContext2D, budget: number): Fit {
+  const shown = target.getBoundingClientRect();
+  const box = shown.width > 0 && shown.height > 0 ? shown : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+  const fit = fitBox(box, window.devicePixelRatio || 1, budget);
+  if (target.width !== fit.pixelsWide || target.height !== fit.pixelsHigh) {
+    target.width = fit.pixelsWide;
+    target.height = fit.pixelsHigh;
+  }
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, target.width, target.height);
+  c.setTransform(fit.sx, 0, 0, fit.sy, -fit.left * fit.sx, -fit.top * fit.sy);
+  return fit;
+}
+
 export function initGfx(parent: HTMLElement) {
   canvas = document.createElement("canvas");
   canvas.className = "fx-canvas";
   parent.appendChild(canvas);
   ctx = canvas.getContext("2d");
-  const resize = () => {
-    if (!canvas) return;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    // Soft glows do not need retina sharpness: cap the backing store at about two megapixels.
-    scale = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(2_200_000 / Math.max(1, w * h)));
-    canvas.width = Math.round(w * scale);
-    canvas.height = Math.round(h * scale);
-  };
-  resize();
-  window.addEventListener("resize", resize);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) last = 0;
   });
@@ -241,18 +309,16 @@ function frame() {
   last = now;
   const dt = now < frozenUntil ? 0 : raw * rate;
   stepParticles(dt);
-  stepEffects(dt);
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  ctx.clearRect(0, 0, canvas.width / scale, canvas.height / scale);
+  fitCanvas(canvas, ctx, 2_200_000);
   drawParticles(ctx);
-  for (const e of effects) {
-    if (e.age < 0) continue;
-    ctx.save();
-    e.draw(ctx, Math.min(1, e.age / e.life), e.age);
-    ctx.restore();
-  }
+  playEffects(dt, ctx);
   if (particles.length || effects.length) requestAnimationFrame(frame);
-  else running = false;
+  else {
+    running = false;
+    // Nothing left to draw: leave the canvas empty rather than holding the last frame.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
 }
 
 function drawParticles(c: CanvasRenderingContext2D) {
