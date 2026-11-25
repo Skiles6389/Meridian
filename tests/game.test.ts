@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CARDS, getCard } from "../src/game/cards";
-import { enemiesTakeLead, splitTurnEvents } from "../src/game/chase";
+import { attackersOf, enemiesTakeLead, splitTurnEvents } from "../src/game/chase";
 import { PLAYER, performEndTurn, performPlayCard, setCombatFxSink, startEncounter, type CombatFx } from "../src/game/combat";
 import { ENCOUNTERS, ENEMIES } from "../src/game/enemies";
 import { EVENTS } from "../src/game/events";
@@ -137,9 +137,21 @@ describe("combat", () => {
         expect(player.some((event) => (event.t === "hit" || event.t === "evade") && event.from !== PLAYER), id).toBe(false);
         const enemyShots = enemy.filter((event) => event.t === "hit" || event.t === "evade");
         expect(enemyShots.every((event) => event.who === PLAYER), id).toBe(true);
+        const attackers = attackersOf(enemy);
+        expect(new Set(attackers).size, id).toBe(attackers.length);
+        for (const shot of enemyShots) if (shot.t === "hit" || shot.t === "evade") expect(attackers, id).toContain(shot.from);
       }
     }
     expect(enemiesTakeLead([{ t: "turn", n: 2 }])).toBe(false);
+    expect(
+      attackersOf([
+        { t: "move", uid: 12, kind: "defend", name: "Guard" },
+        { t: "move", uid: 11, kind: "attack", name: "Cut" },
+        { t: "hit", who: PLAYER, from: 11, amount: 4, blocked: 0, hp: 50, shield: 0 },
+        { t: "evade", who: PLAYER, from: 11 },
+        { t: "hit", who: 12, from: PLAYER, amount: 2, blocked: 0, hp: 40, shield: 0 },
+      ]),
+    ).toEqual([11]);
     expect(splitTurnEvents([{ t: "down", who: 3 }])).toEqual({ enemy: [{ t: "down", who: 3 }], player: [] });
   });
 
