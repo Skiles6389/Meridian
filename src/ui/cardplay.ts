@@ -228,23 +228,42 @@ export function rearmJet(who: number): HTMLElement[] {
   return empty;
 }
 
-interface Launch {
+interface Hang {
   /** The middle of the weapon on screen. */
   p: Pt;
   /** Which way it points, tail to nose, as a unit vector. */
   dir: Pt;
   /** Its length on screen, nose to tail. */
   len: number;
+}
+
+interface Launch extends Hang {
   shape: StoreShape;
   bay: boolean;
   /** -1 for the left wing, 1 for the right. */
   side: number;
+  /** Where the station is on screen now: read again each frame, so a weapon leaves a jet that is moving from where its pylon has got to. */
+  now: () => Hang;
 }
 
 const spotOf = (el: Element): Pt => {
   const r = el.getBoundingClientRect();
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 };
+
+/** Where the weapon on a station is on screen, and how it lies: from its nose and tail markers, or from the station's box. */
+function hang(el: Element, bay: boolean): Hang {
+  const nose = el.querySelector(".sn");
+  const tail = el.querySelector(".st");
+  if (nose && tail) {
+    const a = spotOf(tail);
+    const b = spotOf(nose);
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    return { p: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, dir: { x: (b.x - a.x) / len, y: (b.y - a.y) / len }, len };
+  }
+  const r = el.getBoundingClientRect();
+  return { p: { x: r.left + r.width / 2, y: r.top + r.height * (bay ? 0.25 : 0.62) }, dir: { x: 0, y: -1 }, len: r.width * (bay ? 0.8 : 0.9) };
+}
 
 /**
  * Takes the next weapon of the wanted kinds off a jet: its pylon is left empty, or its bay door
@@ -261,8 +280,13 @@ function release(who: number, want: StoreKind[]): Launch | null {
   const mid = center(who);
   const fallback: StoreShape = want.includes("agm") ? "agm" : "aim120";
   if (!el) {
-    const p = muzzle(who);
-    return p ? { p, dir: { x: 0, y: -1 }, len: 34 * depth(who), shape: fallback, bay: false, side: Math.random() < 0.5 ? -1 : 1 } : null;
+    // Nothing left on the wings: it comes from the gun's place on the jet, which is still on the airframe.
+    const at = (): Hang | null => {
+      const p = muzzle(who);
+      return p ? { p, dir: { x: 0, y: -1 }, len: 34 * depth(who) } : null;
+    };
+    const first = at();
+    return first ? { ...first, shape: fallback, bay: false, side: Math.random() < 0.5 ? -1 : 1, now: () => at() ?? first } : null;
   }
   const kind = el.dataset.kind as StoreKind;
   const bay = kind === "bay";
@@ -271,18 +295,12 @@ function release(who: number, want: StoreKind[]): Launch | null {
     later(720, () => el.classList.remove("open"));
   } else if (kind !== "pod") el.classList.add("spent");
   el.classList.remove("fresh");
-  const nose = el.querySelector(".sn");
-  const tail = el.querySelector(".st");
-  if (nose && tail) {
-    const a = spotOf(tail);
-    const b = spotOf(nose);
-    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-    const p = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    return { p, dir: { x: (b.x - a.x) / len, y: (b.y - a.y) / len }, len, shape: (el.dataset.shape as StoreShape) ?? storeShape(kind), bay: false, side: mid && p.x < mid.x ? -1 : 1 };
-  }
-  const r = el.getBoundingClientRect();
-  const p = { x: r.left + r.width / 2, y: r.top + r.height * (bay ? 0.25 : 0.62) };
-  return { p, dir: { x: 0, y: -1 }, len: r.width * (bay ? 0.8 : 0.9), shape: bay ? fallback : storeShape(kind), bay, side: mid && p.x < mid.x ? -1 : 1 };
+  const first = hang(el, bay);
+  const shape = bay ? fallback : el.querySelector(".sn") ? ((el.dataset.shape as StoreShape) ?? storeShape(kind)) : storeShape(kind);
+  // A re-render replaces the station's element: the launch then keeps the last place it read.
+  let last = first;
+  const now = () => (el.isConnected ? (last = hang(el, bay)) : last);
+  return { ...first, shape, bay, side: mid && first.p.x < mid.x ? -1 : 1, now };
 }
 
 /* ----------------------------------------------------------------- casts */
@@ -337,14 +355,21 @@ function emitters(who: number): Pt[] {
   return nose ? [nose] : [];
 }
 
-/** A faint ripple in the air from `o` towards `b`: the only sign of a jamming signal on its way. */
-function shimmer(o: Pt, b: Pt, life: number, delay: number, waves: number) {
-  const dir = Math.atan2(b.y - o.y, b.x - o.x);
-  const dist = Math.hypot(b.x - o.x, b.y - o.y);
+/**
+ * A faint ripple in the air towards `b`: the only sign of a jamming signal on its way. It leaves
+ * emitter number `index` on `who`, read each frame, so it stays on a jet that is moving.
+ */
+function shimmer(who: number, index: number, aimAt: (o: Pt) => Pt, life: number, delay: number, waves: number) {
   void addEffect({
     life,
     delay,
     draw: (c, k) => {
+      const from = emitters(who);
+      const o = from[index % Math.max(1, from.length)];
+      if (!o) return;
+      const b = aimAt(o);
+      const dir = Math.atan2(b.y - o.y, b.x - o.x);
+      const dist = Math.hypot(b.x - o.x, b.y - o.y);
       c.globalCompositeOperation = "lighter";
       c.lineWidth = 1.1;
       for (let j = 0; j < waves; j++) {
@@ -381,7 +406,9 @@ const STEPS: { [K in Step["fx"]]: (s: StepOf<K>, ctx: CastCtx) => void } = {
     void tick(longest, (dt, _k, age, c) => {
       for (const f of list) {
         if (age < f.delay) continue;
-        if (!f.lit) {
+        // The frame a flare is lit is spent at the dispenser, however long that frame took.
+        const fresh = !f.lit;
+        if (fresh) {
           // Each flare leaves the dispenser where the jet is at that moment.
           const ports = marks(PLAYER, "flare");
           const p = ports.length ? ports[f.port % ports.length] : anchor(PLAYER, f.port % 2 ? 0.6 : 0.4, 0.85);
@@ -391,13 +418,14 @@ const STEPS: { [K in Step["fx"]]: (s: StepOf<K>, ctx: CastCtx) => void } = {
           f.vx *= p.x < mid.x ? -1 : 1;
           f.lit = true;
           flash(p.x, p.y, 7 * k, "#fff1c4", 0.06);
+        } else {
+          f.age += dt;
+          if (f.age >= f.life) continue;
+          f.vy += 430 * k * dt;
+          f.vx *= 0.3 ** dt;
+          f.x += f.vx * dt;
+          f.y += f.vy * dt;
         }
-        f.age += dt;
-        if (f.age >= f.life) continue;
-        f.vy += 430 * k * dt;
-        f.vx *= 0.3 ** dt;
-        f.x += f.vx * dt;
-        f.y += f.vy * dt;
         const t = f.age / f.life;
         // It falls behind towards the camera, so it swells as it burns out.
         const r = f.size * (1 + t * 1.5) * rnd(0.85, 1.15);
@@ -431,21 +459,29 @@ const STEPS: { [K in Step["fx"]]: (s: StepOf<K>, ctx: CastCtx) => void } = {
   },
 
   jam(s, ctx) {
-    const from = emitters(PLAYER);
-    if (!from.length) return;
-    const mid = center(PLAYER);
+    const count = emitters(PLAYER).length;
+    if (!count) return;
     if (s.on === "self") {
       // Barrage jamming: the pods radiate out to both sides.
-      for (const o of from) {
-        const dir = mid && o.x < mid.x ? -1 : 1;
-        shimmer(o, { x: o.x + dir * 190, y: o.y - 150 }, 0.6, 0, s.power + 1);
+      for (let i = 0; i < count; i++) {
+        shimmer(
+          PLAYER,
+          i,
+          (o) => {
+            const mid = center(PLAYER);
+            return { x: o.x + (mid && o.x < mid.x ? -1 : 1) * 190, y: o.y - 150 };
+          },
+          0.6,
+          0,
+          s.power + 1,
+        );
       }
       return;
     }
     for (const who of targetsOf(s.on, ctx)) {
       const b = center(who);
       if (!b) continue;
-      from.forEach((o, i) => shimmer(o, b, 0.55, i * 0.05, s.power + 1));
+      for (let i = 0; i < count; i++) shimmer(PLAYER, i, () => b, 0.55, i * 0.05, s.power + 1);
       hullStatic(who, 0.22 + s.power * 0.08, 0.3);
     }
   },
@@ -777,19 +813,39 @@ function bezier(a: Pt, c1: Pt, c2: Pt, b: Pt, t: number): Pt {
   };
 }
 
-/** The gun firing: a star of flame at the muzzle stabbing towards the target, lighting the jet around it, and smoke swept back. */
-function muzzleFlash(a: Pt, toward: Pt, k: number, cal: number, round: number) {
-  const dir = Math.atan2(toward.y - a.y, toward.x - a.x);
-  const s = (12 + 8 * cal) * k * rnd(0.8, 1.2);
-  flash(a.x, a.y, s * 1.1, "#ffd27a", 0.09);
-  glow(a.x, a.y, s * 2.4, "#ffb347", 0.12, s, 0.45);
+/** How long the flash stays on the muzzle after the last round of a burst has left, in seconds. */
+const FLASH_TAIL = 0.11;
+
+/**
+ * The gun firing: a star of flame on the muzzle, stabbing towards the target for as long as the
+ * burst lasts. It is drawn where the gun port is on screen in each frame, so it stays on a jet that
+ * is swaying or flying a pass, and it is there in the very frame the first round leaves.
+ */
+function muzzleFire(who: number, toward: Pt, k: number, cal: number, life: number) {
+  let beat = -1;
+  let s = 0;
+  let turn = 0;
   void addEffect({
-    life: 0.075,
-    draw: (c, t) => {
+    life,
+    draw: (c, _t, age) => {
+      const m = muzzle(who);
+      if (!m) return;
+      // A fresh shape every few hundredths of a second: the flash flickers with the rounds rather than glowing.
+      const now = Math.floor(age / 0.032);
+      if (now !== beat) {
+        beat = now;
+        s = (13 + 8 * cal) * k * rnd(0.75, 1.25);
+        turn = rnd(-0.1, 0.1);
+      }
       c.globalCompositeOperation = "lighter";
-      c.globalAlpha = 1 - t * t;
-      c.translate(a.x, a.y);
-      c.rotate(dir);
+      c.globalAlpha = age > life - FLASH_TAIL ? Math.max(0, (life - age) / FLASH_TAIL) : 1;
+      c.translate(m.x, m.y);
+      c.rotate(Math.atan2(toward.y - m.y, toward.x - m.x) + turn);
+      const lit = c.globalAlpha;
+      const halo = s * 2;
+      c.globalAlpha = lit * 0.6;
+      c.drawImage(fxSprite("glow", "#ffb347"), -halo, -halo, halo * 2, halo * 2);
+      c.globalAlpha = lit;
       const g = c.createLinearGradient(0, 0, s * 3.2, 0);
       g.addColorStop(0, "#ffffff");
       g.addColorStop(0.35, "#ffd27a");
@@ -815,6 +871,12 @@ function muzzleFlash(a: Pt, toward: Pt, k: number, cal: number, round: number) {
       c.fill();
     },
   });
+}
+
+/** What one round leaves at the muzzle as it goes: a pop of light and a wisp of smoke swept back. */
+function muzzlePuff(a: Pt, k: number, cal: number, round: number) {
+  const s = (12 + 8 * cal) * k * rnd(0.8, 1.2);
+  flash(a.x, a.y, s * 1.1, "#ffd27a", 0.09);
   if (round % 2 === 0) smoke(a.x, a.y, (6 + 5 * cal) * k, "#d5d9de", 0.45 + 0.2 * cal, { alpha: 0.12 + 0.1 * cal, vx: rnd(-14, 14), vy: rnd(14, 44) * k, grow: (16 + 12 * cal) * k });
 }
 
@@ -854,6 +916,7 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
       if (s.pass) closeIn(from, to, burst + s.ms + 320);
       else if (cal > 1.3) shudder(from, burst + 140, 2.5);
     }
+    muzzleFire(from, hullPoint(to, 0) ?? aim.b, ka, cal, burst / 1000 + FLASH_TAIL);
     let struck: Pt | null = null;
     for (let i = 0; i < s.rounds; i++) {
       const t = s.rounds > 1 ? i / (s.rounds - 1) - 0.5 : 0;
@@ -867,6 +930,7 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
       } else struck = land;
       const far = wide ? kb * 0.55 : kb;
       let a: Pt | null = null;
+      let drawn = 0;
       void addEffect({
         life: flight * (wide ? 1.25 : 1),
         delay: (i * s.gap) / 1000,
@@ -875,14 +939,21 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
             // Read the muzzle as the round leaves, so a jet that is moving still fires from its gun.
             a = muzzle(from);
             if (!a) return;
-            muzzleFlash(a, land, ka, cal, i);
+            muzzlePuff(a, ka, cal, i);
           }
           // A round flying away from the camera closes on its vanishing point: fast at first, then slower.
           const e = 1 - (1 - k) ** 1.45;
-          const tail = Math.max(0, e - 0.14 * (1 - e * 0.6));
-          const sc = lerp(ka, far, e);
-          const hx = lerp(a.x, land.x, e);
-          const hy = lerp(a.y, land.y, e);
+          // Its first frame shows it just clear of the barrel, with its tail still in the gun.
+          const clear = Math.min(0.2, (16 * ka + 8) / (Math.hypot(land.x - a.x, land.y - a.y) || 1));
+          const head = Math.max(e, clear);
+          // The streak covers all the ground the round crossed since the last frame. At a full frame
+          // rate that is a short dash; when frames drop it is a line back to where it was last seen,
+          // so tracer always reads as coming from the gun and never appears in mid-air.
+          const tail = Math.min(drawn, Math.max(0, head - 0.14 * (1 - head * 0.6)));
+          drawn = head;
+          const sc = lerp(ka, far, head);
+          const hx = lerp(a.x, land.x, head);
+          const hy = lerp(a.y, land.y, head);
           c.globalCompositeOperation = "lighter";
           c.lineCap = "round";
           c.globalAlpha = wide ? 1 - k * k : 1;
@@ -895,7 +966,7 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
           c.strokeStyle = "#fff3d6";
           c.lineWidth = cal * sc + 0.4;
           c.beginPath();
-          c.moveTo(lerp(a.x, land.x, (tail + e) / 2), lerp(a.y, land.y, (tail + e) / 2));
+          c.moveTo(lerp(a.x, land.x, (tail + head) / 2), lerp(a.y, land.y, (tail + head) / 2));
           c.lineTo(hx, hy);
           c.stroke();
           const g = 5 * cal * sc + 2;
@@ -923,33 +994,58 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
       // A bay throws its weapon clear of the jet before the motor lights.
       await wait(130);
       const fall = len * 0.9;
-      await tick(0.15 * (from === PLAYER ? 1 : 0.8), (_dt, k, _age, c) => drawWeapon(c, shape, { x: p0.x, y: p0.y + fall * k * k }, dir0, len, 0));
+      await tick(0.15 * (from === PLAYER ? 1 : 0.8), (_dt, k, _age, c) => {
+        p0 = store.now().p;
+        drawWeapon(c, shape, { x: p0.x, y: p0.y + fall * k * k }, dir0, len, 0);
+      });
       p0 = { x: p0.x, y: p0.y + fall };
     }
     const tailOf = (p: Pt, dir: Pt, l: number): Pt => ({ x: p.x - (dir.x * l) / 2, y: p.y - (dir.y * l) / 2 });
-    // The motor lights where the missile hangs: a flare at its tail and smoke blown back past the wing.
-    const t0 = tailOf(p0, dir0, len);
-    flash(t0.x, t0.y, body * 4.5 * s.size, FIRE, 0.14);
-    for (let i = 0; i < 5; i++) smoke(t0.x, t0.y, body * trail.size * 1.3, trail.color, trail.life, { alpha: trail.alpha, vx: -dir0.x * rnd(20, 70) * ka + rnd(-14, 14), vy: -dir0.y * rnd(20, 70) * ka + rnd(10, 40) * ka, grow: body * trail.size * 3.2 });
-    if (!store.bay) await tick(0.06, (_dt, k, _age, c) => drawWeapon(c, shape, p0, dir0, len, k * s.size ** 0.5));
-    const rect = spriteEl(to)?.getBoundingClientRect();
-    const hull = hullPoint(to, 0.6) ?? aim.b;
-    // A dodged missile loses its lock and sails by wide of the target.
-    const land = aim.miss && rect ? { x: hull.x + store.side * rect.width * 0.75, y: hull.y - rect.height * 1.3 } : hull;
+    /** Seconds the motor burns on the rail before the missile moves. */
+    const rail = store.bay ? 0 : 0.06;
+    const flight = (s.ms / 1000) * (aim.miss ? 1.2 : 1);
     const far = (kb / ka) * (aim.miss ? 0.5 : 1);
-    // It runs straight off the rail the way it was pointing, then the seeker pulls it round onto the target.
-    const reach = Math.hypot(land.x - p0.x, land.y - p0.y) * 0.3 + s.loft * ka * 0.4 + len;
-    const c1 = { x: p0.x + dir0.x * reach, y: p0.y + dir0.y * reach };
-    const c2 = { x: land.x + store.side * (16 + s.loft * 0.4) * kb * 2, y: land.y + (36 - s.loft * 0.3) * kb };
+    let land: Pt = aim.b;
+    let path: { c1: Pt; c2: Pt } | null = null;
+    let lit = false;
     let prev = 0;
-    let last: Pt = t0;
+    let last: Pt = p0;
     let heading = dir0;
     await addEffect({
-      life: (s.ms / 1000) * (aim.miss ? 1.2 : 1),
-      draw: (c, k) => {
+      life: rail + flight,
+      draw: (c, _k, age) => {
+        if (age < rail || !lit) {
+          // On the rail it is still part of the jet: it is drawn where the pylon is in this frame.
+          if (!store.bay) ({ p: p0, dir: dir0 } = store.now());
+          heading = dir0;
+        }
+        if (!lit) {
+          lit = true;
+          // The motor lights where the missile hangs: a flare at its tail and smoke blown back past the wing.
+          const t0 = tailOf(p0, dir0, len);
+          last = t0;
+          flash(t0.x, t0.y, body * 4.5 * s.size, FIRE, 0.14);
+          for (let i = 0; i < 5; i++) smoke(t0.x, t0.y, body * trail.size * 1.3, trail.color, trail.life, { alpha: trail.alpha, vx: -dir0.x * rnd(20, 70) * ka + rnd(-14, 14), vy: -dir0.y * rnd(20, 70) * ka + rnd(10, 40) * ka, grow: body * trail.size * 3.2 });
+        }
+        if (age < rail) {
+          drawWeapon(c, shape, p0, dir0, len, (age / rail) * s.size ** 0.5);
+          return;
+        }
+        if (!path) {
+          const rect = spriteEl(to)?.getBoundingClientRect();
+          const hull = hullPoint(to, 0.6) ?? aim.b;
+          // A dodged missile loses its lock and sails by wide of the target.
+          land = aim.miss && rect ? { x: hull.x + store.side * rect.width * 0.75, y: hull.y - rect.height * 1.3 } : hull;
+          // It runs straight off the rail the way it was pointing, then the seeker pulls it round onto the target.
+          const reach = Math.hypot(land.x - p0.x, land.y - p0.y) * 0.3 + s.loft * ka * 0.4 + len;
+          path = { c1: { x: p0.x + dir0.x * reach, y: p0.y + dir0.y * reach }, c2: { x: land.x + store.side * (16 + s.loft * 0.4) * kb * 2, y: land.y + (36 - s.loft * 0.3) * kb } };
+        }
+        const { c1, c2 } = path;
+        const k = Math.min(1, (age - rail) / flight);
         const e = (k ** 1.7 * (1 - 0.25 * k)) / 0.75;
         // Seen from behind it shrinks as it goes, and shortens as it turns end-on to the camera.
         const lenAt = (t: number) => len * lerp(1, far, t) * (1 - 0.3 * t);
+        // Smoke is laid along every part of the path crossed since the last frame, so the trail runs unbroken back to the pylon.
         const steps = Math.max(1, Math.ceil((e - prev) / 0.012));
         for (let i = 1; i <= steps; i++) {
           const t = prev + ((e - prev) * i) / steps;
@@ -1022,6 +1118,11 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
       bay.classList.add("open");
       later(620, () => bay.classList.remove("open"));
       await wait(90);
+      if (bay.isConnected) {
+        // The jet has moved on while the doors opened.
+        const now = bay.getBoundingClientRect();
+        a = { x: now.left + now.width / 2, y: now.top + now.height * 0.3 };
+      }
     }
     if (!a) return wait(s.ms);
     const start = a;
@@ -1066,8 +1167,8 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
 
   ew(s, aim) {
     const b = hullPoint(aim.to, 0.5) ?? aim.b;
-    const from = emitters(aim.from);
-    for (let i = 0; i < s.pulses; i++) from.forEach((o, n) => shimmer(o, b, (s.ms / 1000) * 1.2, i * 0.08 + n * 0.03, 3));
+    const count = emitters(aim.from).length;
+    for (let i = 0; i < s.pulses; i++) for (let n = 0; n < count; n++) shimmer(aim.from, n, () => b, (s.ms / 1000) * 1.2, i * 0.08 + n * 0.03, 3);
     hullStatic(aim.to, 0.3, (s.ms / 1000) * 0.6);
     setLanding(aim.to, b);
     return wait(s.ms);
