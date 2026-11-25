@@ -48,8 +48,11 @@ import {
   castCard,
   discardHand,
   disengage,
+  downJet,
+  downPlayer,
   flipHand,
   flyTokens,
+  forceDemise,
   handRects,
   handSnaps,
   initFx,
@@ -59,6 +62,7 @@ import {
   setBar,
   setSlowMo,
   setSpeed,
+  settleWrecks,
   shuffleFx,
   snapBars,
   snapCard,
@@ -361,8 +365,8 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
       await wait(120);
       await castCard(card.id, card.target);
     }
-    const ctx = { card: card?.id, salvo: card?.salvo, bars: barsOf(pre), pendingDown };
-    const turnCtx = { bars: ctx.bars, pendingDown };
+    const ctx = { card: card?.id, salvo: card?.salvo, bars: barsOf(pre) };
+    const turnCtx = { bars: ctx.bars };
     if (opts.turn) {
       const timeline = splitTurnEvents(events);
       if (enemiesTakeLead(timeline.enemy)) {
@@ -381,6 +385,9 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
     }
     if (ended) {
       const won = run.screen !== "defeat";
+      if (!won) await downPlayer();
+      // The last jet down gets to finish falling before the result comes up.
+      await settleWrecks();
       await wait(250);
       if (won) sfx("win");
       await banner(won ? "Splash" : "Airframe lost", won ? (pre.combat!.rewardMode === "boss" ? "Corridor boss down" : "Contacts cleared") : run.defeatReason, won ? "win" : "loss");
@@ -947,7 +954,7 @@ window.addEventListener("resize", () => {
   }, 140);
 });
 
-if (import.meta.env.DEV) (window as unknown as { __dogfight: unknown }).__dogfight = { app, draw, persist, play, setSlowMo, particleCount, effectCount };
+if (import.meta.env.DEV) (window as unknown as { __dogfight: unknown }).__dogfight = { app, draw, persist, play, setSlowMo, particleCount, effectCount, downJet, forceDemise };
 (window as unknown as { __dogfightAudio: unknown }).__dogfightAudio = audioDebug;
 initAnchorSheet();
 

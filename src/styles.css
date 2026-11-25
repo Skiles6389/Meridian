@@ -429,6 +429,14 @@ button {
   opacity: 1;
 }
 
+/* Where a shot-down jet falls and hits: over the moving ground, under everything else in the fight. */
+.sc-world {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 /* ------------------------------------------------------------- buttons */
 
 .btn {
@@ -3417,8 +3425,13 @@ button.card {
   display: none;
 }
 
-.foe.crashing .unit-art {
-  animation: crash 1.15s cubic-bezier(0.5, 0, 0.9, 0.6) forwards;
+/*
+ * A jet that has been killed: its painting goes at once, because the effects canvases draw its death
+ * from a copy of it, and its labels fade out behind.
+ */
+.foe.crashing .unit-art,
+.ally.crashing .unit-art {
+  visibility: hidden;
 }
 
 .foe.crashing .unit-hud,
@@ -3427,19 +3440,8 @@ button.card {
   transition: opacity 0.3s;
 }
 
-@keyframes crash {
-  0% {
-    transform: translate(0, 0) rotate(0) scale(1);
-    filter: brightness(1);
-  }
-  15% {
-    filter: brightness(2.5);
-  }
-  100% {
-    transform: translate(30%, 180%) rotate(70deg) scale(0.55);
-    filter: brightness(0.2) blur(2px);
-    opacity: 0;
-  }
+.foe.crashing {
+  pointer-events: none;
 }
 
 .unit-hud {

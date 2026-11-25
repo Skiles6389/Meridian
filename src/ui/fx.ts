@@ -3,11 +3,14 @@ import { PLAYER, type CombatFx } from "../game/combat";
 import { attitude, cubic, cubicTangent, flightView, mirrored, sixSpots, sizeAlong, swapIn, swapOut, type CamShape, type CamShot, type Curve, type FlightView, type Spot } from "./camera";
 import { C, cardAnim, type Impact, type Shot } from "./cardfx";
 import { deflect, ENEMY_IMPACT, enemyShot, fireShot, hullSheen, playImpact, type EnemyStyle } from "./cardplay";
-import { addEffect, emit, flash, freezeGfx, glow, initGfx, ring, setGfxRate, shards, smoke, sparks } from "./gfx";
-import { artEl, blastScale, center, depth, easeOut, initGeo, lerp, marks, midOf, rectOf, rectOfSel, reduced, rnd, setTimeScale, timeScale, unitEl, wait, type Pt } from "./geo";
+import { addEffect, emit, flash, freezeGfx, glow, initGfx, ring, setGfxRate, smoke, sparks } from "./gfx";
+import type { Cause } from "./crashplan";
+import { downJet, initWreck } from "./wreck";
+import { artEl, center, depth, easeOut, initGeo, lerp, marks, midOf, rectOf, rectOfSel, reduced, rnd, setTimeScale, timeScale, unitEl, wait, type Pt } from "./geo";
 
 export { wait, unitEl } from "./geo";
 export { castCard, rearmJet } from "./cardplay";
+export { downJet, forceDemise, settleWrecks } from "./wreck";
 
 let layer: HTMLElement;
 let svg: SVGSVGElement;
@@ -28,6 +31,7 @@ export function initFx(appRoot: HTMLElement) {
   const resize = () => svg.setAttribute("viewBox", `0 0 ${window.innerWidth} ${window.innerHeight}`);
   resize();
   window.addEventListener("resize", resize);
+  initWreck({ hitStop, shake, flashScreen, burst });
 }
 
 export function fxLayer(): HTMLElement {
@@ -504,54 +508,14 @@ function flashScreen() {
   drop(spawn("flash-screen", 0, 0), 260);
 }
 
-/** Trails dark smoke and the odd flare-up behind a jet while its crash animation plays. */
-function smokeFollow(who: number, ms: number) {
-  if (reduced()) return;
-  const art = artEl(who);
-  if (!art) return;
-  let since = 0;
-  let n = 0;
-  void addEffect({
-    life: ms / 1000,
-    draw: (_c, _k, age) => {
-      if (age - since < 0.04) return;
-      since = age;
-      const r = art.getBoundingClientRect();
-      if (!r.width) return;
-      const p = { x: r.left + r.width * 0.45, y: r.top + r.height * 0.5 };
-      smoke(p.x, p.y, 30 + Math.random() * 18, "#2c2e34", 1.2, { alpha: 0.6 });
-      glow(p.x, p.y, 12 + Math.random() * 8, C.flame, 0.2);
-      if (n % 5 === 2) burst(p.x + r.width * 0.12, p.y, 34, "hit");
-      n += 1;
-    },
-  });
-}
+/** What last hurt each unit, so that when one dies the death fits the weapon. */
+const lastCause = new Map<number, Cause>();
 
-async function shootDown(who: number, pendingDown: Set<number>) {
-  const c = center(who);
-  const k = blastScale(who);
-  sfx("explode");
-  if (c) {
-    flashScreen();
-    burst(c.x, c.y, 130 * k, "big");
-    shards(c.x, c.y, 16, "#3d434c", 380 * k + 80, 9 * k + 3);
-    shards(c.x, c.y, 6, C.flame, 300 * k + 60, 5 * k + 2);
-    later(150, () => burst(c.x + 40 * k, c.y - 18 * k, 70 * k, "boom"));
-    later(500, () => {
-      const p = center(who);
-      if (p) burst(p.x - 20 * k, p.y + 10 * k, 60 * k, "boom");
-      sfx("hit");
-    });
-  }
-  const unit = unitEl(who);
-  if (unit) {
-    unit.classList.add("crashing");
-    smokeFollow(who, 1050);
-    if (pendingDown.has(who)) window.setTimeout(() => unit.classList.add("down"), 1100);
-  }
-  await hitStop(110);
-  shake(13);
-  await wait(330);
+/** The player's own jet going down, when the sortie is lost. */
+export function downPlayer(): Promise<void> {
+  const cause = lastCause.get(PLAYER) ?? "other";
+  lastCause.clear();
+  return downJet(PLAYER, cause);
 }
 
 /* ---------------------------------------------------------------- bars */
@@ -652,8 +616,6 @@ export interface PlayContext {
   /** True for a card that hits every enemy: its shots at each target fly together. */
   salvo?: boolean;
   bars: Map<number, { hp: number; shield: number }>;
-  /** Foes that were alive before the action and are already drawn as down. */
-  pendingDown: Set<number>;
 }
 
 /** Shot and impact for the player's damage that does not come from a card's own shot: a snap burst from the gun. */
@@ -681,7 +643,9 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       lastFrom = event.from;
       let impact: Impact;
       let heavyShot = false;
+      let cause: Cause;
       if (event.from === PLAYER) {
+        cause = shotOf.fx === "gun" ? "gun" : shotOf.fx === "ew" ? "other" : "blast";
         impact = impactOf;
         heavyShot = impact.fx === "fireball";
         if (!prefired.has(i)) {
@@ -708,10 +672,12 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
         } else await wait(50);
       } else {
         const style = enemyStyle(event.amount + event.blocked, volley);
+        cause = style === "tracer" ? "gun" : "blast";
         impact = ENEMY_IMPACT[style];
         heavyShot = style === "heavy";
         await fireShot(enemyShot(style), event.from, event.who, volley);
       }
+      if (event.amount > 0) lastCause.set(event.who, cause);
       const heavy = event.amount >= 12 || (heavyShot && event.amount > 0);
       const crit = event.amount >= 15;
       ctx.bars.set(event.who, { hp: event.hp, shield: event.shield });
@@ -749,6 +715,7 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       ctx.bars.set(event.who, { hp: event.hp, shield: ctx.bars.get(event.who)?.shield ?? 0 });
       setBar(event.who, event.hp, ctx.bars.get(event.who)?.shield ?? 0);
       if (event.amount > 0) {
+        lastCause.set(event.who, "burn");
         floatText(event.who, String(event.amount), "dmg dmg-burn");
         barKick(event.who, "hurt");
       }
@@ -802,7 +769,8 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       }
       window.setTimeout(() => unit?.classList.remove("acting"), 700);
     } else if (event.t === "down") {
-      await shootDown(event.who, ctx.pendingDown);
+      await downJet(event.who, lastCause.get(event.who) ?? "other");
+      lastCause.delete(event.who);
     } else if (event.t === "phase") {
       floatText(event.uid, event.text, "phase-float");
       const c = center(event.uid);

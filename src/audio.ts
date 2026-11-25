@@ -57,14 +57,19 @@ export type Cue =
   | "crit"
   | "flip"
   | "node"
-  | "travel";
+  | "travel"
+  | "breakup"
+  | "flameout"
+  | "dive"
+  | "groundhit"
+  | "splash";
 
 /** Every cue, for tests that check effect recipes name real sounds. */
 export const CUE_NAMES: Cue[] = [
   "click", "draw", "play", "cannon", "missile", "heavy", "zap", "hit", "hitBig", "explode", "shield", "block", "heal", "hurt", "evade", "error",
   "turn", "win", "lose", "unlock", "whoosh", "gold", "boss", "flare", "chaff", "lock", "ping", "glitch", "laser", "brrt", "rocket", "bomb", "slash",
   "plate", "shieldUp", "cloak", "burner", "vent", "repair", "tape", "reload", "power", "crack", "system", "flyby", "tick", "shuffle", "discard",
-  "exhaust", "energy", "crit", "flip", "node", "travel",
+  "exhaust", "energy", "crit", "flip", "node", "travel", "breakup", "flameout", "dive", "groundhit", "splash",
 ];
 
 export type Track = "title" | "act1" | "act2" | "act3" | "boss";
@@ -319,6 +324,44 @@ const CUES: Record<Cue, (t: number) => void> = {
     for (let i = 0; i < 7; i++) {
       hiss({ dur: 0.04, gain: 0.07 + Math.random() * 0.06, at: t + 0.12 + Math.random() * 0.75, filter: { type: "highpass", freq: 2200 } });
     }
+  },
+  // An airframe coming apart: the crack of the structure, the fireball, then torn metal ringing as it tumbles.
+  breakup: (t) => {
+    hiss({ dur: 0.07, gain: 0.4, at: t, filter: { type: "highpass", freq: 2600 } });
+    tone({ type: "sine", freq: 150, to: 24, dur: 1.1, gain: 0.6, at: t });
+    tone({ type: "sawtooth", freq: 70, to: 32, dur: 0.6, gain: 0.07, at: t, filter: { type: "lowpass", freq: 420 } });
+    hiss({ dur: 1.5, gain: 0.52, at: t, filter: { type: "lowpass", freq: 3200, to: 120 } });
+    for (let i = 0; i < 6; i++) {
+      const at = t + 0.16 + Math.random() * 0.8;
+      tone({ type: "triangle", freq: 900 + Math.random() * 1700, to: 500 + Math.random() * 400, dur: 0.09, gain: 0.03, at, filter: { type: "bandpass", freq: 1800, q: 3 } });
+      hiss({ dur: 0.04, gain: 0.06, at, filter: { type: "highpass", freq: 3000 } });
+    }
+  },
+  // Fuel catching: a soft whump, then fire roaring in the slipstream.
+  flameout: (t) => {
+    tone({ type: "sine", freq: 120, to: 46, dur: 0.3, gain: 0.34, at: t });
+    hiss({ dur: 0.7, gain: 0.26, at: t, attack: 0.04, filter: { type: "bandpass", freq: 420, to: 1500, q: 0.8 } });
+    for (let i = 0; i < 5; i++) hiss({ dur: 0.03, gain: 0.08, at: t + 0.1 + Math.random() * 0.55, filter: { type: "highpass", freq: 2400 } });
+  },
+  // A jet going down out of control: the engine note falling away under the wind.
+  dive: (t) => {
+    tone({ type: "sawtooth", freq: 820, to: 190, dur: 1.25, gain: 0.1, at: t, attack: 0.08, filter: { type: "bandpass", freq: 1200, to: 420, q: 2 } });
+    tone({ type: "sine", freq: 1320, to: 300, dur: 1.25, gain: 0.055, at: t, attack: 0.1 });
+    hiss({ dur: 1.25, gain: 0.17, at: t, attack: 0.5, filter: { type: "bandpass", freq: 700, to: 2000, q: 0.9 } });
+  },
+  // The wreck hitting land: a deep, dull blast and earth coming back down.
+  groundhit: (t) => {
+    tone({ type: "sine", freq: 96, to: 22, dur: 1.3, gain: 0.62, at: t });
+    hiss({ dur: 1.7, gain: 0.5, at: t, filter: { type: "lowpass", freq: 1700, to: 90 } });
+    hiss({ dur: 0.2, gain: 0.22, at: t, filter: { type: "bandpass", freq: 700, q: 0.7 } });
+    for (let i = 0; i < 8; i++) hiss({ dur: 0.05, gain: 0.05 + Math.random() * 0.05, at: t + 0.25 + Math.random() * 0.9, filter: { type: "bandpass", freq: 900 + Math.random() * 1400, q: 1.5 } });
+  },
+  // The wreck hitting the sea: a thump, a tall wash of water, and spray falling back.
+  splash: (t) => {
+    tone({ type: "sine", freq: 105, to: 26, dur: 0.9, gain: 0.5, at: t });
+    hiss({ dur: 1.3, gain: 0.42, at: t, attack: 0.03, filter: { type: "bandpass", freq: 2000, to: 520, q: 0.6 } });
+    hiss({ dur: 1.1, gain: 0.3, at: t, filter: { type: "lowpass", freq: 1500, to: 110 } });
+    hiss({ dur: 0.9, gain: 0.07, at: t + 0.3, attack: 0.2, filter: { type: "highpass", freq: 4200 } });
   },
   shield: (t) => {
     tone({ type: "sine", freq: 640, to: 980, dur: 0.28, gain: 0.07, at: t, attack: 0.015 });
