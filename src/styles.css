@@ -2965,7 +2965,11 @@ button.card {
   }
 }
 
-/* Head-up display: gun cross, pitch ladder, and speed and altitude tapes. */
+/*
+ * Head-up display: horizon marks and the speed and altitude tapes. Nothing is drawn in the middle
+ * of the screen: that is the line of fire between the player's jet and its target, and a sight
+ * hanging there reads as the place the shots come from. The designator on the target is the sight.
+ */
 .cam-hud {
   position: absolute;
   inset: 0;
@@ -2983,30 +2987,16 @@ button.card {
   opacity: 0.35;
 }
 
-.hud-cross {
-  position: absolute;
-  left: 50%;
-  top: 54%;
-  width: 34px;
-  height: 34px;
-  translate: -50% -50%;
-  background:
-    linear-gradient(currentColor, currentColor) center / 2px 34% no-repeat,
-    linear-gradient(currentColor, currentColor) center / 34% 2px no-repeat;
-  border: 2px solid currentColor;
-  border-radius: 50%;
-  filter: drop-shadow(0 0 4px rgba(80, 255, 150, 0.6));
-}
-
+/* Two short horizon marks out by the edges of the view. */
 .hud-ladder {
   position: absolute;
   left: 50%;
   top: 54%;
-  width: min(30cqw, 300px);
+  width: min(88cqw, 760px);
   height: 2px;
   translate: -50% 0;
-  background: linear-gradient(90deg, currentColor 0 30%, transparent 30% 70%, currentColor 70%);
-  opacity: 0.55;
+  background: linear-gradient(90deg, currentColor 0 7%, transparent 7% 93%, currentColor 93%);
+  opacity: 0.45;
 }
 
 .hud-tape {
@@ -5628,11 +5618,6 @@ div.loot > span {
 
   .hud-tape {
     display: none;
-  }
-
-  .hud-cross {
-    width: 24px;
-    height: 24px;
   }
 
   .pilot {

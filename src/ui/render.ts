@@ -674,7 +674,6 @@ function camHud(run: RunState): string {
   const alt = HUD_ALT[run.act] + ((turn * 370) % 900) - 450;
   const mach = (0.82 + ((turn * 7) % 9) / 100).toFixed(2);
   return `<div class="cam-hud" aria-hidden="true">
-      <i class="hud-cross"></i>
       <i class="hud-ladder"></i>
       <span class="hud-tape spd"><small>M</small>${mach}</span>
       <span class="hud-tape alt"><small>ALT</small>${alt.toLocaleString("en-US").replace(",", " ")}</span>
