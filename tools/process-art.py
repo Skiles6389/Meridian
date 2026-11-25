@@ -35,6 +35,12 @@ NOZZLES = {
     "f35": (289, 397), "f35_boss": (310, 384), "a10": (390, 338),
 }
 
+# Side views whose exhaust is not a lit blob at the tail: the A-10's engines sit in pods mid-fuselage.
+SIDE_NOZZLE_FIXED = {"a10"}
+
+# Side views with an unlit exhaust, as fractions of the cropped sprite.
+SIDE_NOZZLE = {"f16": [0.17, 0.62]}
+
 
 def key_magenta(img: Image.Image) -> Image.Image:
     rgb = np.asarray(img.convert("RGB")).astype(np.float32)
@@ -82,10 +88,15 @@ def process_jets(src: Path) -> dict:
         final = resize_rgba(crop, width)
         final.save(OUT / "jets" / f"{jet}.webp", "WEBP", quality=80, method=6)
         nx, ny = NOZZLES[jet]
-        meta[jet] = {
-            "aspect": round(crop.width / crop.height, 4),
-            "nozzle": [round((nx - x0) / crop.width, 4), round((ny - y0) / crop.height, 4)],
-        }
+        nozzle = [round((nx - x0) / crop.width, 4), round((ny - y0) / crop.height, 4)]
+        if jet not in SIDE_NOZZLE_FIXED:
+            # The exhaust is the hot blob at the tail end (the left) of a side view.
+            tail = crop.crop((0, 0, int(crop.width * 0.42), crop.height))
+            blobs = glow_blobs(tail)
+            if blobs:
+                bx, by, br = min(blobs)
+                nozzle = [round((bx + br * 0.6) * 0.42, 4), by]
+        meta[jet] = {"aspect": round(crop.width / crop.height, 4), "nozzle": SIDE_NOZZLE.get(jet, nozzle)}
     return meta
 
 
@@ -97,8 +108,20 @@ FOE_CAMS = [
 
 # Rear views whose livery fools the glow finder, as [x, y, r] fractions of the cropped sprite.
 CHASE_NOZZLES = {
-    "f4f_boss-rear": [[0.4369, 0.8655, 0.0151], [0.5631, 0.8655, 0.0151]],
-    "typhoon_boss-rear": [[0.4447, 0.925, 0.02], [0.558, 0.925, 0.02]],
+    "f4f_boss-rear": [[0.445, 0.875, 0.026], [0.555, 0.875, 0.026]],
+    "typhoon_boss-rear": [[0.455, 0.945, 0.034], [0.545, 0.945, 0.034]],
+}
+
+# Painted-on underwing stores (and one long exhaust flame) to clear, as [x0, y0, x1, y1] fractions
+# of the cropped sprite. The game hangs its own missiles on the pylons so they can be launched.
+CHASE_ERASE = {
+    "a10-rear": [[0.125, 0.67, 0.195, 0.80], [0.202, 0.70, 0.255, 0.83], [0.745, 0.70, 0.798, 0.83], [0.805, 0.67, 0.875, 0.80]],
+    "f104-rear": [[0.21, 0.77, 0.30, 0.91], [0.705, 0.77, 0.80, 0.91]],
+    "alphajet-rear": [[0.165, 0.70, 0.23, 0.805], [0.78, 0.70, 0.845, 0.805]],
+    "alphajet-front": [[0.105, 0.712, 0.178, 0.795], [0.735, 0.743, 0.858, 0.84]],
+    "mig29-rear": [[0.16, 0.703, 0.276, 0.752], [0.724, 0.703, 0.84, 0.752]],
+    "typhoon_boss-rear": [[0.103, 0.81, 0.149, 0.885], [0.851, 0.81, 0.897, 0.885]],
+    "f35-rear": [[0.43, 0.79, 0.57, 1.0]],
 }
 
 
@@ -159,6 +182,14 @@ def process_chase(src: Path) -> dict:
         x0, x1 = max(0, xs.min() - pad), min(raw.width, xs.max() + pad)
         y0, y1 = max(0, ys.min() - pad), min(raw.height, ys.max() + pad)
         crop = keyed.crop((x0, y0, x1, y1))
+        boxes = CHASE_ERASE.get(out)
+        if boxes:
+            px = np.array(crop)
+            for bx0, by0, bx1, by1 in boxes:
+                px[int(by0 * crop.height):int(by1 * crop.height), int(bx0 * crop.width):int(bx1 * crop.width)] = 0
+            crop = Image.fromarray(px, "RGBA")
+            ys, xs = np.where(px[..., 3] > 26)
+            crop = crop.crop((max(0, xs.min() - pad), max(0, ys.min() - pad), min(crop.width, xs.max() + pad), min(crop.height, ys.max() + pad)))
         final = resize_rgba(crop, width)
         final.save(OUT / "chase" / f"{out}.webp", "WEBP", quality=78, method=6)
         meta[out] = {"aspect": round(crop.width / crop.height, 4), "nozzles": CHASE_NOZZLES.get(out) or (glow_blobs(crop) if rear else [])}
