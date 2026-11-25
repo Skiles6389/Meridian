@@ -99,6 +99,8 @@ Card effects are physically grounded: everything starts from a real place on the
 - **Rockets** ripple from the A-10's pods, **bombs** fall from the belly or bay, and a jamming attack is a faint shimmer from the EA-18G's pods followed by interference and arcing on the target's hull.
 - **Flares** eject from the dispensers and fall behind, **chaff** is a glittering cloud from the tail, a **shield or plating** card is a sheen across the hull and a blocked hit is a ricochet off it, stealth cards darken the hull and dim the exhaust, and maneuver cards fly the maneuver with vapour off the wingtips.
 
+Effects hold to those places at any frame rate and on any screen. Every effect is drawn at both ends of its life however long a frame takes: a round's first frame is at the muzzle and its last is on the target, and a flash or a puff of smoke spends its first frame where it was made. A tracer streak covers all the ground the round crossed since the last frame, so on a phone that is dropping frames it is a line from the gun port, never a dash that appears in mid-air. A missile's first frame is on its pylon, read where the pylon is in that frame, and its smoke is laid along the whole path back to it. The effects canvas measures the box it is shown in every frame and draws in the page's own coordinates, so it cannot drift from the sprites when a phone browser's toolbars change the window. Nothing sits in the middle of the screen between your jet and its target: the head-up display keeps to the edges, and the designator on the target is the sight.
+
 The code is split by job:
 
 - `src/ui/anchors.ts` is the table of where things are on each chase sprite, in percentages of the sprite: the gun muzzle and the weapon stations for every jet in every view, plus flare dispensers, the chaff point, jamming pods, wingtips, belly and nose for the player jets.
@@ -109,7 +111,7 @@ The code is split by job:
 - `src/ui/loadout.ts` remembers which pylons have been fired, so a redraw does not put a missile back.
 - `src/ui/cardfx.ts` is pure data: one recipe per card id. A recipe is a list of cast steps on your own jet, an optional shot, an impact, and how long the cast leads the hit. Cards of one kind share a base animation and differ in its numbers.
 - `src/ui/cardplay.ts` draws those recipes. Enemy fire uses the same shots.
-- `src/ui/gfx.ts` is the engine: particles and drawn effects on a single full-screen 2D canvas, capped at 700 particles, with a freeze for hit-stop. A turn costs a redraw of that canvas and almost no DOM work.
+- `src/ui/gfx.ts` is the engine: particles and drawn effects on a single full-screen 2D canvas, capped at 700 particles, with a freeze for hit-stop. It fits the canvas to its on-screen box each frame, and guarantees every effect its first and last frame. A turn costs a redraw of that canvas and almost no DOM work.
 - `src/ui/fx.ts` runs the timeline: card ghosts, deal, discard and reshuffle, damage numbers, bars, banners, the camera, and the enemy swap.
 - `src/ui/crashplan.ts` and `src/ui/wreck.ts` are how a jet dies (see below): the first is the choice, the timings and the break lines, as plain data; the second draws it.
 - `src/motion.css` holds the easing tokens, the one-shot UI animations, screen entrances, and the reduced-motion overrides.
@@ -184,12 +186,26 @@ Painted art lives in `src/assets/art/` as WebP (about 2.8 MB in total):
 - Chase camera: every player jet has a rear view and every enemy has rear and front views; foes stay inside the frame and clear of each other on desktop, phone portrait, and phone landscape; the enemy-turn shot pulls back well over twice as wide; the six slots sit behind and below your jet without overlapping; the swap leaves past the screen edge, re-enters from beyond it, and arrives tail-on (also on a wide, short landscape stage), and the overshoot leaves tail-on and settles back from the side it left by; heading picks the rear, profile, or front-quarter painting
 - Anchors: every anchor of every chase sprite lands on a solid pixel of the sprite, not in the air around it; every player jet has a gun muzzle, weapon stations, flare dispensers and the other markers on its rear view; every enemy has a muzzle and stations in both its rear and front-quarter views; every chase sprite has an entry and every point is inside its sprite; the guns sit where the real ones do; the F-22 and F-35 use bays; pylons fire once each, wanted kinds first, and rearm
 - Stores and backdrop: the F-16 carries AIM-9s on its tips and AIM-120s on its pylons, hanging weapons lean inward and more so further out, each has nose and tail markers for the launch; every act has a sky and a ground texture, the jet's sway stays gentle and stops for reduced motion, the wide shot is wider and faster
-- Effects: every card id has its own animation recipe and no two recipes are the same; recipes only use known steps, shots, impacts and sound cues; every attack has a shot and an impact; the particle pool respects its cap and effects settle with no canvas
+- Effects: every card id has its own animation recipe and no two recipes are the same; recipes only use known steps, shots, impacts and sound cues; every attack has a shot and an impact; the particle pool respects its cap and effects settle with no canvas; an effect is drawn first at its very start and last at its very end at 60, 15, 4 and 1 frames a second, and a particle's first frame is where it was emitted; a client coordinate drawn through the canvas fit lands on itself on phone, desktop and offset or shortened layers at 1x, 2x and 3x
 - Shoot-downs: both deaths can happen under every weapon, a burning jet always crashes and a jet on your six always breaks up; a boss's death is bigger and longer with secondary explosions; the hit-stop is short and sits on the explosion; every beat has a sound cue; the break lines tile the sprite with no gaps, stay inside it, and always include four wing panels and a tail; a fall only goes down, a spiral rolls right round, and the landing point is below the horizon, on screen and away from your jet on desktop and phone; a mark on the ground moves toward the camera and grows until it passes underneath, and stays put when the ground is not moving
 - A scripted interceptor build can kill the Act 1 boss
 - Seeded autopilot sorties reach Act 2
 - Balance simulator smoke test: both bots fly full sorties on every jet without errors at Rookie, Normal, Threat 5, and Threat 10, a seed replays identically, the smarter bot clears some but not all starter-jet sorties, and runs go deeper on Rookie than on Normal and deeper on Normal than on Threat 10
 - Difficulty, A-10C, and new content: old saves default to Normal, the ladder unlocks one level per win, Plating persists and caps, every new event choice resolves
+
+### In a real browser
+
+`npm run e2e` runs the game in WebKit (the engine behind Safari) and Chromium with Playwright, against the dev server and against the single-file build in `play/`. Install the browsers once with `npx playwright install webkit chromium` (and `npx playwright install-deps` on a fresh Linux machine). Set `E2E_URL` to also run against a deployed copy.
+
+`e2e/origin.e2e.ts` checks where attacks come from. It renders a battle at 390x844 and 430x932 at 3x, 844x390 at 3x, and 1280x800, plays Gun Burst and a missile card by tapping them, and records everything the effects canvas draws in screen coordinates (`e2e/probe.js` reads the canvas's live transform, backing store and on-screen box, so a drawing that is stretched or offset is seen as the player sees it). It then asserts, to within 4 CSS pixels:
+
+- the gun marker sits where the anchor table puts the muzzle on the sprite's screen-space bounding box (to within 1 pixel);
+- the first tracer drawn starts at that projected muzzle, the muzzle flash is on it in the same frame, and no later streak starts anywhere but the muzzle or tracer already drawn;
+- a missile's first drawn frame is on the station it was fired from, a bay weapon's is at the bay;
+- the first flare of Flare Pop is lit on a flare dispenser, at the slow frame rate;
+- on the enemy turn, enemy tracer starts at the enemy's projected muzzle while it flies its attack.
+
+Each gun check runs at the browser's own pace and again held to about 15 frames a second. The F-16 is checked on every screen, the A-10 and F-22 on the 390x844 phone.
 
 ## Design notes
 
