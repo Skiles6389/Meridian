@@ -33,7 +33,7 @@ npm run build:single
 
 1. Pick a jet and a difficulty in the hangar. Only the **F-16C Fighting Falcon** is available on a fresh browser.
 2. Each act is a fully visible branching map. Choose a lane, then the next connected plot.
-3. Fights are turn-based and seen from a chase camera just behind and above your jet. You draw 5 cards, spend Energy, then end the turn. On your turn the camera sits close on your tail and looks ahead at the bandits, with a HUD bracket on the one you are tracking; tap or click a jet to pick your target. Each enemy telegraphs its next action with an intent icon above it, and its hull, Shield, and statuses sit just below. Your own hull, Shield, statuses, and powers are on the pilot panel. When you end the turn the camera pulls well back to a wide external view of your jet and the airspace around it. Each attacking bandit flies a break turn: it sweeps out to the side, comes round, and settles onto your six, banking along the curve and trailing vapour. While they are behind you the tag reads "Bandits on your six". From there they fire forward at your jet, and the hits, blocks, and dodges land on it. Bandits that are only shielding or buffing roll in place. Then they overshoot back out ahead of you, and the camera pushes back in for your turn. With reduced motion turned on, the bandits move straight to the six and back without the flight.
+3. Fights are turn-based and seen from a chase camera just behind and above your jet. You draw 5 cards, spend Energy, then end the turn. On your turn the camera sits close on your tail and looks ahead at the bandits, with a HUD bracket on the one you are tracking; tap or click a jet to pick your target. Each enemy telegraphs its next action with an intent icon above it, and its hull, Shield, and statuses sit just below. Your own hull, Shield, statuses, and powers are on the pilot panel. When you end the turn the camera pulls well back to a wide external view of your jet and the airspace around it. Each attacking bandit banks out past the edge of the screen trailing vapour, stays out of sight for a beat, then comes back in low and settles onto your six. While they are behind you the tag reads "Bandits on your six". From there they fire forward at your jet, and the hits, blocks, and dodges land on it. Bandits that are only shielding or buffing roll in place. Then they overshoot off-screen ahead of you and drop back into their slots as the camera pushes in for your turn. With reduced motion turned on, the bandits move straight to the six and back without the flight.
 4. HP carries from fight to fight. It rises only when something heals you: a card, a relic, a reward, a depot, or an event.
 5. Clear the act boss to generate the next corridor. Clear Act 3's boss, **Nebelhorn**, to win.
 
@@ -90,6 +90,33 @@ Systems exhaust and stay in effect for the fight. The hand holds 10 cards.
 
 Controls: click a card to play it, or drag it onto the stage. Cards that need a target arm on click (an arrow follows the pointer), then fire at the enemy you click; dragging onto an enemy also works. On a phone, the first tap raises a card so you can read it, and a second tap (or a tap on an enemy) plays it. Keys: `1–9` play a card, `E` or `Enter` ends the turn, `Esc` cancels. Clicking during an animation speeds it up.
 
+## Animation and effects
+
+Battle effects are drawn on one full-screen canvas instead of DOM nodes, so a turn costs a redraw of that canvas and nothing else.
+
+- `src/ui/gfx.ts` is the engine: additive particles and drawn effects on a single 2D canvas, capped at 700 particles, with a freeze for hit-stop.
+- `src/ui/cardfx.ts` is pure data: one recipe per card id. A recipe is a list of cast steps around your jet or the target (lock reticles, radar pings, plates, static, flares), an optional shot (tracer stream, missile, rockets, beam, bombs), an impact, and how long the cast leads the hit.
+- `src/ui/cardplay.ts` draws those recipes. Enemy fire uses the same vocabulary.
+- `src/ui/fx.ts` runs the timeline: card ghosts, deal, discard and reshuffle, damage numbers, bars, banners, the camera, the enemy swap, and shoot-downs.
+- `src/motion.css` holds the easing tokens, the one-shot UI animations, screen entrances, and the reduced-motion overrides.
+
+To give a new card its animation, add one entry to `CARD_ANIMS` in `cardfx.ts`:
+
+```ts
+myCard: {
+  cast: [{ fx: "lock", color: C.red, shape: "circle", on: "target", sfx: "lock" }],
+  shot: msl({ wobble: 16 }),
+  impact: { fx: "blast", color: C.hot },
+  lead: 200,
+},
+```
+
+A card with no entry still plays with a plain fallback, and the tests fail until it gets its own.
+
+On the enemy turn the camera pulls back and the attackers bank out past the edge of the screen, stay out of sight for a beat, then come back in low onto your six. After firing they overshoot off-screen and return to their slots. Two attackers take a little under four seconds.
+
+With `prefers-reduced-motion` set, flights, particles, shake and hit-stop are skipped and state changes cut straight to their result.
+
 ## What's in the box
 
 - 85+ cards across a shared pool and five jet pools
@@ -105,7 +132,7 @@ Enemies are real German-operated types flown by fictional flights with animal an
 Painted art lives in `src/assets/art/` as WebP (about 2.4 MB in total):
 
 - `jets/`: 17 side-view airframes on transparent backgrounds, used in the hangar, title, and HUD. `jets.json` records each image's aspect ratio and nozzle position, which the game uses to place the afterburner glow.
-- `chase/`: 25 chase-camera sprites: a rear view of each of the five player jets and of each enemy airframe, plus a front-quarter view of each enemy for when it comes round toward the camera in a break turn. `chase.json` records each sprite's aspect ratio and lit nozzles for the afterburner flicker.
+- `chase/`: 25 chase-camera sprites: a rear view of each of the five player jets and of each enemy airframe, plus a front-quarter view of each enemy for when it comes round toward the camera during the swap. `chase.json` records each sprite's aspect ratio and lit nozzles for the afterburner flicker.
 - `scenes/`: act skies (stormy sea, river valley at dusk, high altitude under the aurora), high-altitude chase-camera versions of each for battles, drifting fog layers, the hangar, the depot, and the briefing-chart paper.
 - `cards/`: 20 illustration themes that the cards map onto by effect.
 - `events/`: one scene per mystery, plus the gamble and intermission screens.
@@ -120,7 +147,8 @@ Painted art lives in `src/assets/art/` as WebP (about 2.4 MB in total):
 - Combat: damage, Shield, Burn, Evasion, Locked, Jam, the Kite's Energy discount, and a play-through of every card
 - Sortie flow: HP does not reset after a fight, the F-15E unlocks when Graue Eule goes down, depots sell cards and repairs
 - Content: every jet, enemy, card, and event has art; a pre-re-skin combat save loads with the new names
-- Chase camera: every player jet has a rear view and every enemy has rear and front views; foes stay inside the frame and clear of each other on desktop, phone portrait, and phone landscape; the enemy-turn shot pulls back well over twice as wide; the six slots sit behind and below your jet without overlapping; the break turn sweeps out wide, comes round, and arrives tail-on (also on a wide, short landscape stage), and the overshoot stays tail-on; heading picks the rear, profile, or front-quarter painting
+- Chase camera: every player jet has a rear view and every enemy has rear and front views; foes stay inside the frame and clear of each other on desktop, phone portrait, and phone landscape; the enemy-turn shot pulls back well over twice as wide; the six slots sit behind and below your jet without overlapping; the swap leaves past the screen edge, re-enters from beyond it, and arrives tail-on (also on a wide, short landscape stage), and the overshoot leaves tail-on and settles back from the side it left by; heading picks the rear, profile, or front-quarter painting
+- Effects: every card id has its own animation recipe and no two recipes are the same; recipes only use known steps, shots, impacts and sound cues; every attack has a shot and an impact; the particle pool respects its cap and effects settle with no canvas
 - A scripted interceptor build can kill the Act 1 boss
 - Seeded autopilot sorties reach Act 2
 - Balance simulator smoke test: both bots fly full sorties on every jet without errors at Rookie, Normal, Threat 5, and Threat 10, a seed replays identically, the smarter bot clears some but not all starter-jet sorties, and runs go deeper on Rookie than on Normal and deeper on Normal than on Threat 10
