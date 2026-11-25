@@ -7,7 +7,7 @@ import "@fontsource/saira-stencil-one/latin-400.css";
 import "./styles.css";
 import { audioDebug, configureAudio, setAmbience, setMusic, sfx, unlockAudio, type Track } from "./audio";
 import { getCard } from "./game/cards";
-import { enemiesTakeLead, splitTurnEvents } from "./game/chase";
+import { attackersOf, enemiesTakeLead, splitTurnEvents } from "./game/chase";
 import { PLAYER, setCombatFxSink, type ActionResult, type CombatFx } from "./game/combat";
 import { HELP } from "./game/help";
 import { loadMeta, loadRun, saveMeta, saveRun } from "./game/meta";
@@ -41,7 +41,9 @@ import { shotStyle } from "./ui/art";
 import {
   aim,
   banner,
+  breakTurns,
   camera,
+  disengage,
   flipHand,
   handRects,
   initFx,
@@ -56,7 +58,7 @@ import {
 } from "./ui/fx";
 import { highestUnlocked, ROOKIE } from "./game/difficulty";
 import type { AppState } from "./ui/model";
-import { isCompact, phoneShape, renderApp, sceneKey, screenName } from "./ui/render";
+import { camShape, isCompact, phoneShape, renderApp, sceneKey, screenName } from "./ui/render";
 import { initScene, setScene } from "./ui/scene";
 
 const meta = loadMeta();
@@ -296,11 +298,15 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
     const ctx = { playerShot: opts.shot, bars: barsOf(pre), pendingDown };
     if (opts.turn) {
       const timeline = splitTurnEvents(events);
-      if (enemiesTakeLead(timeline.enemy)) await Promise.all([banner("Enemy turn", "", "short enemy"), moveCamera("wide")]);
+      if (enemiesTakeLead(timeline.enemy)) {
+        const pullBack = Promise.all([banner("Enemy turn", "", "short enemy"), moveCamera("wide")]);
+        breakTurns(attackersOf(timeline.enemy), camShape());
+        await pullBack;
+      }
       await playEvents(timeline.enemy, ctx);
       if (timeline.player.length) {
-        await wait(380);
-        await moveCamera("close");
+        await wait(60);
+        await Promise.all([moveCamera("close"), disengage()]);
       }
       await playEvents(timeline.player, ctx);
     } else {

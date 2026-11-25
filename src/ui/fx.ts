@@ -1,5 +1,5 @@
 import { sfx } from "../audio";
-import type { CamShot } from "./camera";
+import { attitude, breakTurn, cubic, cubicTangent, flightView, mirrored, overshoot, sixSpots, sizeAlong, type CamShape, type CamShot, type Curve, type FlightView, type Spot } from "./camera";
 import { PLAYER, type CombatFx } from "../game/combat";
 
 let layer: HTMLElement;
@@ -67,23 +67,15 @@ function center(who: number): { x: number; y: number } | null {
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
-function wideCam(): boolean {
-  return !!root.querySelector(".battle.cam-wide");
-}
-
 /**
- * Where shots leave an airframe. The player's jet is seen from behind, so its fire leaves the
- * spine and heads into the frame; enemies turned in to attack fire from the nose of the
- * front-quarter view.
+ * Where shots leave an airframe. Every jet that fires is seen from behind, heading into the frame,
+ * so fire leaves the spine just ahead of centre.
  */
 function muzzle(who: number): { x: number; y: number } | null {
   const el = artEl(who);
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  if (who === PLAYER) return { x: r.left + r.width / 2, y: r.top + r.height * 0.38 };
-  if (!wideCam()) return { x: r.left + r.width / 2, y: r.top + r.height * 0.5 };
-  const right = !!el.querySelector(".cj-front.flip");
-  return { x: r.left + r.width * (right ? 0.8 : 0.2), y: r.top + r.height * 0.6 };
+  return { x: r.left + r.width / 2, y: r.top + r.height * (who === PLAYER ? 0.38 : 0.42) };
 }
 
 /** How near the camera an airframe sits, from its drawn size: about 1 for the player's jet up close. */
@@ -279,17 +271,20 @@ export async function shot(from: number, to: number, style: ShotStyle) {
   }
 }
 
-/**
- * Knocks an airframe about when a hit lands. Hits on the player's jet come from ahead, so it is
- * shoved toward the camera and rolls; a foe ahead is punched away and yaws.
- */
-function recoil(who: number, hard: boolean) {
+/** Knocks an airframe along the line of fire when a hit lands, with a jolt of roll. */
+function recoil(who: number, from: number, hard: boolean) {
   const art = artEl(who);
   if (!art) return;
   hitFlash(who, hard);
   if (reduced()) return;
-  const roll = (Math.random() < 0.5 ? -1 : 1) * (hard ? 7 : 4);
-  const kick = who === PLAYER ? `translate(${roll * 2}px, ${hard ? 16 : 9}px) rotate(${roll}deg) scale(1.03)` : `translate(${roll * 1.5}px, ${hard ? -12 : -6}px) rotate(${roll}deg) scale(0.95)`;
+  const a = center(from);
+  const b = center(who);
+  const dx = a && b ? b.x - a.x : 0;
+  const dy = a && b ? b.y - a.y : -1;
+  const len = Math.hypot(dx, dy) || 1;
+  const push = (hard ? 16 : 9) * Math.max(0.6, depth(who));
+  const roll = (Math.random() < 0.5 ? -1 : 1) * (hard ? 8 : 4);
+  const kick = `translate(${((dx / len) * push).toFixed(1)}px, ${((dy / len) * push).toFixed(1)}px) rotate(${roll}deg) scale(${dy < 0 ? 0.96 : 1.03})`;
   art.animate([{ transform: "none" }, { transform: kick }, { transform: "none" }], { duration: 340, easing: "cubic-bezier(.2,.8,.3,1)" });
 }
 
@@ -324,24 +319,12 @@ function vignette(cls: string) {
   drop(el, 700);
 }
 
-/** An attack run: the foe dives in toward the camera and the player's jet, then pulls off. */
-export function lunge(who: number) {
+/** A quick aileron roll in place, for an enemy move that does not fire at the player. */
+function barrelRoll(who: number) {
   const art = artEl(who);
-  const me = center(who);
-  const target = center(PLAYER);
-  if (!art || !me || !target || reduced()) return;
-  const dx = (target.x - me.x) * 0.18;
-  const dy = (target.y - me.y) * 0.16;
-  const roll = me.x < target.x ? 12 : -12;
-  art.animate(
-    [
-      { transform: "none" },
-      { transform: `translate(${dx.toFixed(0)}px, ${dy.toFixed(0)}px) rotate(${roll}deg) scale(1.28)`, offset: 0.45 },
-      { transform: `translate(${(dx * 0.6).toFixed(0)}px, ${(dy * 0.5).toFixed(0)}px) rotate(${roll * 0.5}deg) scale(1.16)`, offset: 0.7 },
-      { transform: "none" },
-    ],
-    { duration: 900 * speed, easing: "cubic-bezier(.3,.7,.3,1)" },
-  );
+  if (!art || reduced()) return;
+  const dir = Math.random() < 0.5 ? -1 : 1;
+  art.animate([{ rotate: "0deg" }, { rotate: `${dir * 360}deg` }], { duration: 620 * speed, easing: "cubic-bezier(.45,.05,.35,1)" });
 }
 
 /** A hard jink to one side, used when a shot is dodged. */
@@ -349,7 +332,7 @@ function jink(who: number) {
   const art = artEl(who);
   if (!art || reduced()) return;
   const dir = Math.random() < 0.5 ? -1 : 1;
-  const far = who === PLAYER ? 70 : 34;
+  const far = Math.max(24, art.getBoundingClientRect().width * 0.32);
   art.animate(
     [{ transform: "none" }, { transform: `translate(${dir * far}px, -10px) rotate(${dir * 24}deg)` }, { transform: "none" }],
     { duration: 460, easing: "cubic-bezier(.25,.8,.3,1)" },
@@ -357,9 +340,9 @@ function jink(who: number) {
 }
 
 /**
- * Moves the chase camera. "wide" pulls back and widens the frame while enemies attack, and the
- * foes bank around to face the player; "close" pushes back in behind the jet for the player's turn.
- * The stylesheet animates the move; this waits for it to finish.
+ * Moves the chase camera. "wide" pulls well back to an external view of the player's jet for the
+ * enemy turn; "close" pushes back in behind the jet for the player's turn. The stylesheet animates
+ * the move; this waits for it to finish.
  */
 export async function camera(shot: CamShot): Promise<void> {
   const battle = root.querySelector<HTMLElement>(".battle");
@@ -372,8 +355,222 @@ export async function camera(shot: CamShot): Promise<void> {
     return;
   }
   sfx("whoosh");
-  await wait(shot === "wide" ? 950 : 800);
+  await wait(shot === "wide" ? 900 : 800);
   battle.classList.remove("cam-moving");
+}
+
+/* ------------------------------------------------------------ dogfight */
+
+/** Attackers' break turns in flight, by uid; each resolves when that foe is settled on the six. */
+const flights = new Map<number, Promise<void>>();
+
+interface StageBox {
+  rect: DOMRect;
+  /** One camera unit in pixels, matching the stylesheet's `--u`. */
+  u: number;
+}
+
+function stageBox(): StageBox | null {
+  const el = root.querySelector<HTMLElement>(".stage");
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  return { rect, u: Math.min(rect.width / 100, rect.height * 0.018) };
+}
+
+/** A foe's spot right now, in stage percentages with its width in pixels. */
+function spotNow(foe: HTMLElement, box: StageBox): Spot {
+  const r = foe.getBoundingClientRect();
+  return {
+    x: ((r.left + r.width / 2 - box.rect.left) / box.rect.width) * 100,
+    y: ((r.top + r.height / 2 - box.rect.top) / box.rect.height) * 100,
+    s: r.width,
+  };
+}
+
+/** A foe's slot ahead of the player in the close shot, as the stylesheet places it. */
+function closeSlot(foe: HTMLElement, box: StageBox): Spot {
+  const v = (name: string) => Number(foe.style.getPropertyValue(name)) || 0;
+  const aspect = v("--box") || 2.4;
+  return { x: v("--cx"), y: v("--cy"), s: Math.min(v("--cs") * box.u, aspect * box.rect.height * 0.25) };
+}
+
+function showView(foe: HTMLElement, view: FlightView, flip: boolean) {
+  foe.dataset.view = view;
+  foe.querySelector(".cj-front")?.classList.toggle("flip", view === "front" && flip);
+  foe.querySelector(".jet.side")?.classList.toggle("flip", view === "side" && flip);
+}
+
+function placeFoe(foe: HTMLElement, p: { x: number; y: number }, width: number) {
+  foe.style.left = `${p.x.toFixed(2)}%`;
+  foe.style.top = `${p.y.toFixed(2)}%`;
+  foe.style.width = `${width.toFixed(1)}px`;
+}
+
+/** Hands a flown foe back to the stylesheet, which already places it where the flight ended. */
+function landFoe(foe: HTMLElement) {
+  foe.style.removeProperty("left");
+  foe.style.removeProperty("top");
+  foe.style.removeProperty("width");
+  delete foe.dataset.view;
+  const art = foe.querySelector<HTMLElement>(".unit-art");
+  if (art) art.style.rotate = "";
+  void foe.offsetWidth;
+  foe.classList.remove("flying", "in-flight");
+}
+
+function rotated(x: number, y: number, deg: number): { x: number; y: number } {
+  const r = (deg * Math.PI) / 180;
+  return { x: x * Math.cos(r) - y * Math.sin(r), y: x * Math.sin(r) + y * Math.cos(r) };
+}
+
+/** Vapour off the wingtips (or the tail, in profile) at a point along a flight. */
+function contrail(c: Pt, width: number, view: FlightView, dx: number, dy: number, roll: number) {
+  const size = Math.max(4, width * 0.045);
+  if (view === "side") {
+    const len = Math.hypot(dx, dy) || 1;
+    puff({ x: c.x - (dx / len) * width * 0.5, y: c.y - (dy / len) * width * 0.5 }, "puff-contrail", size * 1.3, 760);
+    return;
+  }
+  for (const sideOf of [-1, 1]) {
+    const tip = rotated(sideOf * width * 0.45, width * 0.05, roll);
+    puff({ x: c.x + tip.x, y: c.y + tip.y }, "puff-contrail", size, 720);
+  }
+}
+
+/** A speed streak trailing an airframe along its heading. */
+function zip(c: Pt, width: number, dx: number, dy: number) {
+  const len = Math.hypot(dx, dy) || 1;
+  const across = (Math.random() * 2 - 1) * width * 0.4;
+  const back = width * (0.2 + Math.random() * 0.3);
+  const x = c.x - (dx / len) * back - (dy / len) * across;
+  const y = c.y - (dy / len) * back + (dx / len) * across;
+  const el = spawn("zip", x, y, "<i></i>");
+  el.style.transform = `rotate(${Math.atan2(dy, dx).toFixed(3)}rad)`;
+  el.style.setProperty("--len", `${(width * (0.5 + Math.random() * 0.6)).toFixed(0)}px`);
+  drop(el, 420);
+}
+
+/**
+ * Flies a foe along a curve in stage percentages, growing from `from.s` to `to.s` pixels by how
+ * near the camera it comes, swapping between rear, profile, and front-quarter paintings as its
+ * heading turns, banking into the turn, and trailing vapour and speed streaks.
+ */
+function fly(foe: HTMLElement, curve: Curve, from: Spot, to: Spot, ms: number, box: StageBox): Promise<void> {
+  const art = foe.querySelector<HTMLElement>(".unit-art");
+  foe.classList.add("flying", "in-flight");
+  return new Promise((resolve) => {
+    const start = performance.now();
+    let view: FlightView | undefined;
+    let lastTrail: Pt | null = null;
+    let lastZip = 0;
+    const step = (now: number) => {
+      if (!foe.isConnected) return resolve();
+      const k = Math.min(1, (now - start) / Math.max(1, ms * speed));
+      const t = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+      const p = cubic(curve, t);
+      const d = cubicTangent(curve, Math.min(0.995, Math.max(0.005, t)));
+      const dx = d.x * box.rect.width;
+      const dy = d.y * box.rect.height;
+      view = flightView(dx, dy, view);
+      showView(foe, view, mirrored(view, dx));
+      const width = sizeAlong(from, to, p.y);
+      placeFoe(foe, p, width);
+      const roll = attitude(view, dx, dy);
+      if (art) art.style.rotate = `${roll.toFixed(1)}deg`;
+      const c = { x: box.rect.left + (p.x / 100) * box.rect.width, y: box.rect.top + (p.y / 100) * box.rect.height };
+      if (!lastTrail || Math.hypot(c.x - lastTrail.x, c.y - lastTrail.y) > 11) {
+        contrail(c, width, view, dx, dy, roll);
+        lastTrail = c;
+      }
+      if (now - lastZip > 50 && k > 0.05 && k < 0.95) {
+        zip(c, width, dx, dy);
+        lastZip = now;
+      }
+      if (k < 1) requestAnimationFrame(step);
+      else {
+        foe.classList.remove("in-flight");
+        resolve();
+      }
+    };
+    requestAnimationFrame(step);
+  });
+}
+
+function threatTag(text: string, six: boolean) {
+  const tag = root.querySelector<HTMLElement>(".threat-tag");
+  if (!tag) return;
+  tag.textContent = text;
+  tag.classList.toggle("six", six);
+}
+
+/**
+ * Sends each attacker on a break turn round onto the player's six, starting `delay` ms from now
+ * and staggered so a pair arrive one after the other. Their shots wait on `onSix`.
+ */
+export function breakTurns(attackers: number[], shape: CamShape, delay = 80, stagger = 200) {
+  flights.clear();
+  const box = stageBox();
+  if (!box) return;
+  const foes = attackers
+    .map((uid) => ({ uid, el: unitEl(uid) }))
+    .filter((foe): foe is { uid: number; el: HTMLElement } => !!foe.el && !foe.el.classList.contains("down"))
+    .sort((a, b) => spotNow(a.el, box).x - spotNow(b.el, box).x);
+  const six = sixSpots(
+    foes.map((foe) => foe.el.classList.contains("boss")),
+    shape,
+  );
+  foes.forEach(({ uid, el }, index) => {
+    const aspect = Number(el.style.getPropertyValue("--box")) || 2.4;
+    const target: Spot = { x: six[index].x, y: six[index].y, s: Math.min(six[index].s * box.u, aspect * box.rect.height * 0.3) };
+    const flight = wait(delay + index * stagger).then(async () => {
+      if (!el.isConnected || el.classList.contains("crashing")) return;
+      const from = spotNow(el, box);
+      if (reduced()) {
+        el.classList.add("flying");
+        showView(el, "rear", false);
+        placeFoe(el, target, target.s);
+      } else {
+        const side = from.x < 49 ? -1 : from.x > 51 ? 1 : index % 2 ? 1 : -1;
+        sfx("whoosh");
+        await fly(el, breakTurn(from, target, side, box.rect.width / box.rect.height), from, target, 820, box);
+        showView(el, "rear", false);
+        const art = el.querySelector<HTMLElement>(".unit-art");
+        if (art) art.style.rotate = "0deg";
+      }
+      threatTag("Bandits on your six", true);
+    });
+    flights.set(uid, flight);
+  });
+}
+
+/** Resolves once this foe is on the player's six, or straight away if it is not making a run. */
+export function onSix(uid: number): Promise<void> {
+  return flights.get(uid) ?? Promise.resolve();
+}
+
+/** The overshoot: every foe on the six pulls up past the player and back into its slot ahead. */
+export async function disengage(): Promise<void> {
+  const box = stageBox();
+  const runs = [...flights.keys()];
+  await Promise.all(flights.values());
+  flights.clear();
+  threatTag("Bandits inbound", false);
+  if (!box) return;
+  await Promise.all(
+    runs.map(async (uid, index) => {
+      const el = unitEl(uid);
+      if (!el || !el.classList.contains("flying")) return;
+      if (el.classList.contains("crashing") || el.classList.contains("down") || reduced()) {
+        landFoe(el);
+        return;
+      }
+      const from = spotNow(el, box);
+      const to = closeSlot(el, box);
+      await wait(index * 70);
+      await fly(el, overshoot(from, to, from.x < 50 ? -1 : 1), from, to, 640, box);
+      landFoe(el);
+    }),
+  );
 }
 
 function flashScreen() {
@@ -547,7 +744,7 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       ctx.bars.set(event.who, { hp: event.hp, shield: event.shield });
       setBar(event.who, event.hp, event.shield);
       if (event.amount > 0) {
-        recoil(event.who, heavy);
+        recoil(event.who, event.from, heavy);
         sfx(heavy ? "hitBig" : "hit");
         const crit = event.amount >= 15 ? " dmg-crit" : "";
         floatText(event.who, String(event.amount), event.who === PLAYER ? `dmg dmg-player${crit}` : heavy ? `dmg dmg-big${crit}` : "dmg");
@@ -601,9 +798,15 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       lastFrom = Number.NaN;
       const unit = unitEl(event.uid);
       unit?.classList.add("acting");
-      floatText(event.uid, event.name, "move-name");
-      if (event.kind === "attack") lunge(event.uid);
-      await wait(event.kind === "attack" ? 380 : 300);
+      if (flights.has(event.uid)) {
+        await onSix(event.uid);
+        floatText(event.uid, event.name, "move-name");
+        await wait(90);
+      } else {
+        floatText(event.uid, event.name, "move-name");
+        if (event.kind !== "attack" && event.kind !== "mixed") barrelRoll(event.uid);
+        await wait(event.kind === "attack" ? 300 : 360);
+      }
       window.setTimeout(() => unit?.classList.remove("acting"), 700);
     } else if (event.t === "down") {
       await shootDown(event.who, ctx.pendingDown);

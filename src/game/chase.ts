@@ -1,4 +1,4 @@
-import type { CombatFx } from "./combat";
+import { PLAYER, type CombatFx } from "./combat";
 
 export interface TurnTimeline {
   /** Events from the enemy phase, played with the chase camera pulled back wide. */
@@ -17,4 +17,13 @@ export function splitTurnEvents(events: CombatFx[]): TurnTimeline {
 /** The camera pulls back for the enemy phase only when at least one enemy acts. */
 export function enemiesTakeLead(enemyEvents: CombatFx[]): boolean {
   return enemyEvents.some((event) => event.t === "move");
+}
+
+/** Enemies that shoot at the player in an enemy phase, in the order they first fire. */
+export function attackersOf(enemyEvents: CombatFx[]): number[] {
+  const out: number[] = [];
+  for (const event of enemyEvents) {
+    if ((event.t === "hit" || event.t === "evade") && event.who === PLAYER && event.from !== PLAYER && !out.includes(event.from)) out.push(event.from);
+  }
+  return out;
 }

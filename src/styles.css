@@ -2514,6 +2514,12 @@ button.card {
   animation: six-warn 0.9s ease-in-out infinite alternate;
 }
 
+.threat-tag.six {
+  background: linear-gradient(180deg, #ff5a3a, #b81e12);
+  box-shadow: 0 0 0 2px #1a0806, 0 0 18px rgba(255, 70, 40, 0.6);
+  animation-duration: 0.45s;
+}
+
 @keyframes six-warn {
   to {
     filter: brightness(1.25);
@@ -2649,10 +2655,6 @@ button.card {
   }
 }
 
-.cam-wide .foe .cj-glow {
-  opacity: 0;
-}
-
 .foes {
   position: absolute;
   inset: 0;
@@ -2709,35 +2711,62 @@ button.card {
   animation-delay: calc(var(--slot) * -1.3s);
 }
 
-.foe .cj {
+/*
+ * A foe carries three paintings: rear (the default, flying ahead), front quarter, and profile.
+ * During a dogfight maneuver `data-view` picks the one that matches its heading.
+ */
+.foe .cj,
+.foe .jet.side {
   position: absolute;
   left: 0;
   top: 50%;
   translate: 0 -50%;
-  transition:
-    opacity 0.32s ease,
-    transform 0.75s var(--cam-ease);
-  transition-delay: calc(0.18s + var(--slot) * 0.14s);
+  transition: opacity 0.1s linear;
 }
 
-/* Banking around: the rear view rolls away as the front quarter rolls in. */
-.foe .cj-front {
+.foe .jet.side {
+  left: -9%;
+  width: 118%;
+}
+
+.foe .cj-front,
+.foe .jet.side,
+.foe[data-view="front"] .cj-rear,
+.foe[data-view="side"] .cj-rear {
   opacity: 0;
-  transform: perspective(700px) rotateY(75deg) rotate(-16deg) scale(0.85);
 }
 
-.foe .cj-front.flip {
-  transform: perspective(700px) rotateY(-75deg) rotate(16deg) scale(0.85);
-}
-
-.cam-wide .foe .cj-rear {
-  opacity: 0;
-  transform: perspective(700px) rotateY(-75deg) rotate(18deg) scale(0.9);
-}
-
-.cam-wide .foe .cj-front {
+.foe[data-view="front"] .cj-front,
+.foe[data-view="side"] .jet.side {
   opacity: 1;
-  transform: none;
+}
+
+/* Flown by script: no slot transitions, no hover bob, and its labels stay out of the way. */
+.foe.flying {
+  transition: opacity 0.4s ease, filter 0.2s ease;
+}
+
+.foe.flying .unit-art {
+  animation: chase-sway 5s ease-in-out infinite;
+  transition: rotate 0.4s ease-out;
+}
+
+.foe.in-flight .unit-art {
+  animation: none;
+  transition: none;
+}
+
+.foe.flying > .intent,
+.foe.flying > .unit-hud,
+.foe.flying .reticle {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+/* Foes on the player's six are nearer the camera than its jet. */
+.cam-wide .foes,
+.foes:has(.flying) {
+  z-index: 4;
 }
 
 .foe.down {
@@ -4423,6 +4452,40 @@ body.busy .hand .card {
 
 .puff-launch {
   background: radial-gradient(circle, rgba(255, 250, 235, 0.95), rgba(220, 220, 215, 0.5) 50%, transparent 72%);
+}
+
+.puff-contrail {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.85), rgba(235, 242, 250, 0.45) 50%, transparent 72%);
+}
+
+.zip {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.zip i {
+  position: absolute;
+  right: 0;
+  top: -1px;
+  width: var(--len);
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75));
+  transform-origin: 100% 50%;
+  animation: zip 0.4s ease-out forwards;
+}
+
+@keyframes zip {
+  from {
+    opacity: 0.9;
+    transform: scaleX(0.4);
+  }
+  to {
+    opacity: 0;
+    transform: scaleX(1.3) translateX(-20%);
+  }
 }
 
 .puff-dark {

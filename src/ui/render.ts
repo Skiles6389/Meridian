@@ -12,7 +12,7 @@ import { getRelic } from "../game/relics";
 import { choiceAvailable, reachable, removalCost, repairOf } from "../game/run";
 import type { CardDef, Fighter, MapNode, NodeType, Plan, RunState, Status } from "../game/types";
 import { ACT_SCENE, CHASE_SCENE, SCENE_ART, cardArt, chaseArt, chaseAspect, eventArt, jetArt } from "./art";
-import { allySpot, facesRight, foeSpots, type CamShape, type Spot } from "./camera";
+import { allySpot, foeSpots, type CamShape, type Spot } from "./camera";
 import { icon, nodeIcon, relicIcon } from "./icons";
 import type { AppState } from "./model";
 
@@ -587,7 +587,8 @@ function foeHtml(run: RunState, enemy: Fighter, index: number, app: AppState, cl
       ${down ? "" : intentHtml(plan)}
       <div class="unit-art">
         ${chaseArt(enemy.silhouette, "rear", { livery: def.livery })}
-        ${chaseArt(enemy.silhouette, "front", { livery: def.livery, flip: facesRight(wide) })}
+        ${chaseArt(enemy.silhouette, "front", { livery: def.livery })}
+        ${jetArt(enemy.silhouette, { livery: def.livery, cls: "side" })}
         <div class="reticle"><b>${selected ? "Lock" : "Tgt"}</b><small>${range} nm</small></div>
       </div>
       <div class="unit-hud">
