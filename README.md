@@ -110,7 +110,8 @@ The code is split by job:
 - `src/ui/cardfx.ts` is pure data: one recipe per card id. A recipe is a list of cast steps on your own jet, an optional shot, an impact, and how long the cast leads the hit. Cards of one kind share a base animation and differ in its numbers.
 - `src/ui/cardplay.ts` draws those recipes. Enemy fire uses the same shots.
 - `src/ui/gfx.ts` is the engine: particles and drawn effects on a single full-screen 2D canvas, capped at 700 particles, with a freeze for hit-stop. A turn costs a redraw of that canvas and almost no DOM work.
-- `src/ui/fx.ts` runs the timeline: card ghosts, deal, discard and reshuffle, damage numbers, bars, banners, the camera, the enemy swap, and shoot-downs.
+- `src/ui/fx.ts` runs the timeline: card ghosts, deal, discard and reshuffle, damage numbers, bars, banners, the camera, and the enemy swap.
+- `src/ui/crashplan.ts` and `src/ui/wreck.ts` are how a jet dies (see below): the first is the choice, the timings and the break lines, as plain data; the second draws it.
 - `src/motion.css` holds the easing tokens, the one-shot UI animations, screen entrances, and the reduced-motion overrides.
 
 To give a new card its animation, add one entry to `CARD_ANIMS` in `cardfx.ts`:
@@ -130,9 +131,24 @@ The shots are `gun`, `missile`, `rocket`, `bomb` and `ew`; the cast steps are `f
 
 Behind a fight the world moves as if you are flying over it. One WebGL canvas draws the act's sky above a steady horizon, the sea or terrain streaming toward and under the camera in perspective, a cloud deck and near wisps that pass faster the closer they are, and distant ridges that barely move. The backdrop banks and bobs with your jet, from the same motion that sways the jet itself. On the enemy turn the view widens and the world speeds up a little. It is one full-screen shader pass, and it lowers its own resolution if frames come late. With reduced motion the world creeps and nothing sways. Without WebGL the act's still painting shows instead.
 
+### Shoot-downs
+
+A jet that is killed crashes and explodes, in one of two ways. Both are drawn from a copy of the sprite that was on screen, in its paint.
+
+- **Mid-air kill.** A white impact frame, then a fireball of flat cel tones that cools to a smoke puff. The airframe breaks along jagged lines: the four wing panels are cut from the view you were looking at, and the tail section, centre section and nose from the profile. Each piece is scorched, has a glowing torn edge, and spins and tumbles away under gravity trailing a wisp of smoke.
+- **Crash.** The jet catches fire, rolls off into its profile and goes down nose first, either corkscrewing or in a straight dive, with flames on the airframe and a trail of black smoke. It shrinks toward a point on the sea or the ground and blows up there: a fireball with a column of water and a foam ring over the sea (Acts 1 and 3), or dust, thrown debris and a scorch mark over land (Act 2). The mark is pinned to the moving ground, so it slides toward the camera, grows, and passes away underneath. This is drawn on a second canvas between the backdrop and the fight, so the jet falls behind your own jet and the HUD.
+
+What killed the jet weighs the choice. Missiles, rockets and bombs break a jet up four times in five; gunfire brings it down burning three times in four; a jet that burns to death always goes down; anything else is even. A bandit on your six always breaks up, because it has no room to fall through the frame.
+
+A boss gets a longer, bigger version: its airframe shudders under a run of secondary explosions before the end, the blast and debris are 1.6 times the size, more explosions follow, and the whole thing lasts about twice as long. Your own jet dies the same two ways when a sortie is lost. In a crash the camera stops following, the jet falls away ahead of you, and you fly over where it hit before the result comes up.
+
+The explosion (the break-up, or the impact with the surface) is the frame the hit-stop, the screen shake, the flash and the sound are fired from, all on the effects clock, so they stay together when you tap to hurry. A kill in the middle of a fight holds things up for about half a second and plays out behind your next card; the kill that ends a fight is allowed to finish before the banner. With reduced motion there is one still fireball that fades, and the sound.
+
+To see one kind on every kill in the dev server, run `__dogfight.forceDemise("midair")` or `("crash")` in the console; `null` goes back to choosing.
+
 On the enemy turn the camera pulls back and the attackers bank out past the edge of the screen, stay out of sight for a beat, then come back in low onto your six. After firing they overshoot off-screen and return to their slots. Two attackers take a little under four seconds.
 
-With `prefers-reduced-motion` set, flights, particles, shake and hit-stop are skipped and state changes cut straight to their result. Pylons still empty and rearm.
+With `prefers-reduced-motion` set, flights, particles, crashes, shake and hit-stop are skipped and state changes cut straight to their result. Pylons still empty and rearm.
 
 ## What's in the box
 
@@ -169,6 +185,7 @@ Painted art lives in `src/assets/art/` as WebP (about 2.8 MB in total):
 - Anchors: every anchor of every chase sprite lands on a solid pixel of the sprite, not in the air around it; every player jet has a gun muzzle, weapon stations, flare dispensers and the other markers on its rear view; every enemy has a muzzle and stations in both its rear and front-quarter views; every chase sprite has an entry and every point is inside its sprite; the guns sit where the real ones do; the F-22 and F-35 use bays; pylons fire once each, wanted kinds first, and rearm
 - Stores and backdrop: the F-16 carries AIM-9s on its tips and AIM-120s on its pylons, hanging weapons lean inward and more so further out, each has nose and tail markers for the launch; every act has a sky and a ground texture, the jet's sway stays gentle and stops for reduced motion, the wide shot is wider and faster
 - Effects: every card id has its own animation recipe and no two recipes are the same; recipes only use known steps, shots, impacts and sound cues; every attack has a shot and an impact; the particle pool respects its cap and effects settle with no canvas
+- Shoot-downs: both deaths can happen under every weapon, a burning jet always crashes and a jet on your six always breaks up; a boss's death is bigger and longer with secondary explosions; the hit-stop is short and sits on the explosion; every beat has a sound cue; the break lines tile the sprite with no gaps, stay inside it, and always include four wing panels and a tail; a fall only goes down, a spiral rolls right round, and the landing point is below the horizon, on screen and away from your jet on desktop and phone; a mark on the ground moves toward the camera and grows until it passes underneath, and stays put when the ground is not moving
 - A scripted interceptor build can kill the Act 1 boss
 - Seeded autopilot sorties reach Act 2
 - Balance simulator smoke test: both bots fly full sorties on every jet without errors at Rookie, Normal, Threat 5, and Threat 10, a seed replays identically, the smarter bot clears some but not all starter-jet sorties, and runs go deeper on Rookie than on Normal and deeper on Normal than on Threat 10
