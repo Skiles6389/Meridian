@@ -4,7 +4,7 @@ A roguelike deck-builder about holding three air corridors. You fly one real-wor
 
 The aircraft are real types: you fly an F-16C, F-15E, F-22A, EA-18G, or A-10C against German-operated Starfighters, Alpha Jets, Phantoms, Fulcrums, Tornados, Eurofighters, and the F-35A. Squadrons, callsigns, and the conflict itself are fictional, and every airframe wears neutral markings. No historical or national insignia appear anywhere.
 
-All art is original and painted for this game: side views and chase-camera rear and front views of every jet, layered act skies, a hand-drawn briefing chart, card illustrations, and event scenes. The look is cel-shaded 3D anime: crisp ink outlines, two-to-three-tone shading with hard-edged shadows, a cool rim light and sharp specular highlights, so the jets read as models rather than flat paintings, while the airframes stay true to the real types.
+All art is original and painted for this game: title key art, side views and chase-camera rear and front views of every jet, layered act skies, a hand-drawn briefing chart, card illustrations, and event scenes. The look is cel-shaded 3D anime: crisp ink outlines, two-to-three-tone shading with hard-edged shadows, a cool rim light and sharp specular highlights, so the jets read as models rather than flat paintings, while the airframes stay true to the real types.
 
 **Play in a browser:** [htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/dogfight.html](https://htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/dogfight.html) (the older `play/meridian.html` link serves the same build)
 
@@ -27,7 +27,7 @@ npm run build:single
 
 `npm run build` emits a static site (`base: "./"`), so `dist/` can be hosted on any static file host.
 
-`npm run build:single` writes `dist-single/dogfight.html`: one file (about 2.5 MB) with the script, styles, fonts, and art inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`. Copies are committed at `play/dogfight.html` and `play/meridian.html` (the pre-rename path, kept so old links work), and a workflow rebuilds both on every push to `main`.
+`npm run build:single` writes `dist-single/dogfight.html`: one file (about 4.3 MB) with the script, styles, fonts, and art inlined. Double-click it, or open it from `file://`, on a desktop or phone browser. No server. Sortie progress and unlocks stay in that browser's `localStorage`. Copies are committed at `play/dogfight.html` and `play/meridian.html` (the pre-rename path, kept so old links work), and a workflow rebuilds both on every push to `main`.
 
 ## How a sortie works
 
@@ -94,8 +94,8 @@ Controls: click a card to play it, or drag it onto the stage. Cards that need a 
 
 Card effects are physically grounded: everything starts from a real place on the jet's sprite and behaves like the hardware it stands for.
 
-- **Guns** fire tracer from the jet's actual gun position: the F-16's left wing root, the F-15E's and F-22's right wing root, the EA-18G's nose, the A-10's GAU-8 under the nose, and each enemy's own gun. There is a muzzle flash and gun smoke, the rounds shrink into the distance as they close on the target, and they strike sparks off its hull. Some rounds go wide.
-- **Missiles** hang on the wing pylons as small drawn overlays on every sprite. Playing a missile card drops one off its pylon, lights the motor, and flies it along a guided arc on a smoke trail to detonate on the target. That pylon stays empty until the start of your next turn. The F-22 and F-35 carry theirs inside: a bay door opens and the missile drops out. Enemies launch from their own pylons in the same way.
+- **Guns** fire tracer from the jet's actual gun position: the F-16's left wing root, the F-15E's and F-22's right wing root, the EA-18G's nose, the A-10's GAU-8 under the nose, and each enemy's own gun. The muzzle flash sits on the jet at the gun port and lights the hull around it, the tracers start from it, the rounds shrink into the distance as they close on the target, and they strike sparks off its hull. Some rounds go wide.
+- **Missiles** hang on the wing as drawn missile silhouettes, sized to the airframe's wingspan and leaning in with the rear view's perspective: on the F-16, AIM-9s on the wingtip rails and AIM-120s on the outer pylons. Playing a missile card lights the motor of one of them where it hangs, and that same missile leaves along its own axis, then flies a guided arc on a smoke trail to detonate on the target. That station stays empty until the start of your next turn. The F-22 and F-35 carry theirs inside: a bay door opens and the missile drops out. Enemies launch from their own pylons in the same way.
 - **Rockets** ripple from the A-10's pods, **bombs** fall from the belly or bay, and a jamming attack is a faint shimmer from the EA-18G's pods followed by interference and arcing on the target's hull.
 - **Flares** eject from the dispensers and fall behind, **chaff** is a glittering cloud from the tail, a **shield or plating** card is a sheen across the hull and a blocked hit is a ricochet off it, stealth cards darken the hull and dim the exhaust, and maneuver cards fly the maneuver with vapour off the wingtips.
 
@@ -103,6 +103,9 @@ The code is split by job:
 
 - `src/ui/anchors.ts` is the table of where things are on each chase sprite, in percentages of the sprite: the gun muzzle and the weapon stations for every jet in every view, plus flare dispensers, the chaff point, jamming pods, wingtips, belly and nose for the player jets.
 - `src/ui/art.ts` lays the stores and invisible anchor markers over each sprite, so effects read real screen positions and follow the jet as it moves, banks, or is mirrored.
+- `src/ui/stores.ts` draws the hanging weapons (AIM-9, AIM-120, air-to-ground missile, rocket pod) and works out their size and lean from the airframe's wingspan. The launch effect draws the same shape, so the missile that flies is the one that was hanging.
+- `src/ui/debug.ts` is the anchor sheet: add `#anchors` to the game's address to see every chase sprite on a grid with its anchors marked and labelled, or `#anchors=f16-rear` for one sprite. Use it when adding or moving an anchor.
+- `src/ui/flight.ts` is the moving battle backdrop (see below).
 - `src/ui/loadout.ts` remembers which pylons have been fired, so a redraw does not put a missile back.
 - `src/ui/cardfx.ts` is pure data: one recipe per card id. A recipe is a list of cast steps on your own jet, an optional shot, an impact, and how long the cast leads the hit. Cards of one kind share a base animation and differ in its numbers.
 - `src/ui/cardplay.ts` draws those recipes. Enemy fire uses the same shots.
@@ -123,6 +126,10 @@ myCard: {
 
 The shots are `gun`, `missile`, `rocket`, `bomb` and `ew`; the cast steps are `flares`, `chaff`, `jam`, `armor`, `pose`, `burner`, `vent`, `dim`, `designate`, `scan`, `repair`, `reload`, `strobe`, `spinup` and `crack`. A card with no entry still plays with a plain fallback, and the tests fail until it gets its own. A new airframe needs an entry in `ANCHORS` for each of its chase sprites; the tests fail without one.
 
+### The moving backdrop
+
+Behind a fight the world moves as if you are flying over it. One WebGL canvas draws the act's sky above a steady horizon, the sea or terrain streaming toward and under the camera in perspective, a cloud deck and near wisps that pass faster the closer they are, and distant ridges that barely move. The backdrop banks and bobs with your jet, from the same motion that sways the jet itself. On the enemy turn the view widens and the world speeds up a little. It is one full-screen shader pass, and it lowers its own resolution if frames come late. With reduced motion the world creeps and nothing sways. Without WebGL the act's still painting shows instead.
+
 On the enemy turn the camera pulls back and the attackers bank out past the edge of the screen, stay out of sight for a beat, then come back in low onto your six. After firing they overshoot off-screen and return to their slots. Two attackers take a little under four seconds.
 
 With `prefers-reduced-motion` set, flights, particles, shake and hit-stop are skipped and state changes cut straight to their result. Pylons still empty and rearm.
@@ -139,11 +146,12 @@ Enemies are real German-operated types flown by fictional flights with animal an
 
 ## Art
 
-Painted art lives in `src/assets/art/` as WebP (about 2.4 MB in total):
+Painted art lives in `src/assets/art/` as WebP (about 2.8 MB in total):
 
 - `jets/`: 17 side-view airframes on transparent backgrounds, used in the hangar, title, and HUD. `jets.json` records each image's aspect ratio and nozzle position, which the game uses to place the afterburner glow.
 - `chase/`: 25 chase-camera sprites: a rear view of each of the five player jets and of each enemy airframe, plus a front-quarter view of each enemy for when it comes round toward the camera during the swap. `chase.json` records each sprite's aspect ratio and lit nozzles for the afterburner flicker. The sprites are painted clean, with no weapons on them: missiles and rocket pods are drawn over them at the stations in `src/ui/anchors.ts`.
-- `scenes/`: act skies (stormy sea, river valley at dusk, high altitude under the aurora), high-altitude chase-camera versions of each for battles, drifting fog layers, the hangar, the depot, and the briefing-chart paper.
+- `scenes/`: act skies (stormy sea, river valley at dusk, high altitude under the aurora), high-altitude chase-camera versions of each for battles and a seamless ground texture per act for the moving backdrop, drifting fog layers, the hangar, the depot, the briefing-chart paper, and the title screen's key art (a wide and a tall painting of the dogfight, and two cloud banks that drift across it).
+- `chase-mask.json`: a coarse map of where each chase sprite is solid, which the tests use to keep every anchor on the airframe.
 - `cards/`: 20 illustration themes that the cards map onto by effect.
 - `events/`: one scene per mystery, plus the gamble and intermission screens.
 
@@ -158,7 +166,8 @@ Painted art lives in `src/assets/art/` as WebP (about 2.4 MB in total):
 - Sortie flow: HP does not reset after a fight, the F-15E unlocks when Graue Eule goes down, depots sell cards and repairs
 - Content: every jet, enemy, card, and event has art; a pre-re-skin combat save loads with the new names
 - Chase camera: every player jet has a rear view and every enemy has rear and front views; foes stay inside the frame and clear of each other on desktop, phone portrait, and phone landscape; the enemy-turn shot pulls back well over twice as wide; the six slots sit behind and below your jet without overlapping; the swap leaves past the screen edge, re-enters from beyond it, and arrives tail-on (also on a wide, short landscape stage), and the overshoot leaves tail-on and settles back from the side it left by; heading picks the rear, profile, or front-quarter painting
-- Anchors: every player jet has a gun muzzle, weapon stations, flare dispensers and the other markers on its rear view; every enemy has a muzzle and stations in both its rear and front-quarter views; every chase sprite has an entry and every point is inside its sprite; the guns sit where the real ones do; the F-22 and F-35 use bays; pylons fire once each, wanted kinds first, and rearm
+- Anchors: every anchor of every chase sprite lands on a solid pixel of the sprite, not in the air around it; every player jet has a gun muzzle, weapon stations, flare dispensers and the other markers on its rear view; every enemy has a muzzle and stations in both its rear and front-quarter views; every chase sprite has an entry and every point is inside its sprite; the guns sit where the real ones do; the F-22 and F-35 use bays; pylons fire once each, wanted kinds first, and rearm
+- Stores and backdrop: the F-16 carries AIM-9s on its tips and AIM-120s on its pylons, hanging weapons lean inward and more so further out, each has nose and tail markers for the launch; every act has a sky and a ground texture, the jet's sway stays gentle and stops for reduced motion, the wide shot is wider and faster
 - Effects: every card id has its own animation recipe and no two recipes are the same; recipes only use known steps, shots, impacts and sound cues; every attack has a shot and an impact; the particle pool respects its cap and effects settle with no canvas
 - A scripted interceptor build can kill the Act 1 boss
 - Seeded autopilot sorties reach Act 2
