@@ -1,20 +1,26 @@
 import { sfx } from "../audio";
-import { attitude, breakTurn, cubic, cubicTangent, flightView, mirrored, overshoot, sixSpots, sizeAlong, type CamShape, type CamShot, type Curve, type FlightView, type Spot } from "./camera";
 import { PLAYER, type CombatFx } from "../game/combat";
+import { attitude, cubic, cubicTangent, flightView, mirrored, sixSpots, sizeAlong, swapIn, swapOut, type CamShape, type CamShot, type Curve, type FlightView, type Spot } from "./camera";
+import { C, cardAnim, type Impact, type Shot } from "./cardfx";
+import { ENEMY_IMPACT, enemyShot, fireShot, playImpact } from "./cardplay";
+import { addEffect, emit, flash, freezeGfx, glow, initGfx, ring, setGfxRate, shards, smoke, sparks } from "./gfx";
+import { artEl, blastScale, center, depth, easeOut, initGeo, lerp, midOf, rectOf, rectOfSel, reduced, rnd, setTimeScale, timeScale, unitEl, wait, type Pt } from "./geo";
+
+export { wait, unitEl } from "./geo";
+export { castCard } from "./cardplay";
 
 let layer: HTMLElement;
 let svg: SVGSVGElement;
 let root: HTMLElement;
-let speed = 1;
 const SVG_NS = "http://www.w3.org/2000/svg";
-
-const reduced = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function initFx(appRoot: HTMLElement) {
   root = appRoot;
+  initGeo(appRoot);
   layer = document.createElement("div");
   layer.id = "fx";
   layer.setAttribute("aria-hidden", "true");
+  initGfx(layer);
   svg = document.createElementNS(SVG_NS, "svg");
   svg.classList.add("fx-svg");
   layer.appendChild(svg);
@@ -28,12 +34,18 @@ export function fxLayer(): HTMLElement {
   return layer;
 }
 
+/** Below 1 hurries every running animation along; the player taps during one to skip ahead. */
 export function setSpeed(next: number) {
-  speed = next;
+  setTimeScale(next * slowMo);
+  setGfxRate(1 / (next * slowMo));
 }
 
-export function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms * speed)));
+let slowMo = 1;
+
+/** Stretches every scripted animation by `factor`, for studying one frame by frame in development. */
+export function setSlowMo(factor: number) {
+  slowMo = factor;
+  setSpeed(1);
 }
 
 function spawn(cls: string, x: number, y: number, html = ""): HTMLElement {
@@ -50,40 +62,8 @@ function drop(el: Element, ms: number) {
   window.setTimeout(() => el.remove(), ms);
 }
 
-/* ------------------------------------------------------------- geometry */
-
-export function unitEl(who: number): HTMLElement | null {
-  return root.querySelector<HTMLElement>(`[data-who="${who}"]`);
-}
-
-function artEl(who: number): HTMLElement | null {
-  return unitEl(who)?.querySelector<HTMLElement>(".unit-art") ?? null;
-}
-
-function center(who: number): { x: number; y: number } | null {
-  const el = artEl(who);
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-}
-
-/**
- * Where shots leave an airframe. Every jet that fires is seen from behind, heading into the frame,
- * so fire leaves the spine just ahead of centre.
- */
-function muzzle(who: number): { x: number; y: number } | null {
-  const el = artEl(who);
-  if (!el) return null;
-  const r = el.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height * (who === PLAYER ? 0.38 : 0.42) };
-}
-
-/** How near the camera an airframe sits, from its drawn size: about 1 for the player's jet up close. */
-function depth(who: number): number {
-  const el = artEl(who);
-  const w = el?.getBoundingClientRect().width ?? 0;
-  const ref = Math.min(560, Math.max(260, window.innerWidth * 0.42));
-  return Math.max(0.3, Math.min(1.5, w / ref || 0.6));
+function later(ms: number, fn: () => void) {
+  window.setTimeout(fn, ms * timeScale());
 }
 
 /* --------------------------------------------------------------- pieces */
@@ -107,43 +87,25 @@ export function floatText(who: number, text: string, cls: string) {
   drop(el, 1500);
 }
 
-function muzzleFlash(p: { x: number; y: number }, angle: number, scale = 1) {
-  if (reduced()) return;
-  const el = spawn("mflash", p.x, p.y, "<i></i><i></i>");
-  el.style.setProperty("--k", scale.toFixed(2));
-  el.style.setProperty("--ang", `${angle.toFixed(1)}deg`);
-  drop(el, 180);
-}
-
-function puff(p: { x: number; y: number }, cls: string, size: number, life = 900) {
-  const el = spawn(`puff ${cls}`, p.x + (Math.random() * 2 - 1) * 3, p.y + (Math.random() * 2 - 1) * 3);
-  el.style.setProperty("--s", `${size.toFixed(0)}px`);
-  el.style.setProperty("--dx", `${((Math.random() * 2 - 1) * 10).toFixed(0)}px`);
-  el.style.setProperty("--dy", `${(-6 - Math.random() * 14).toFixed(0)}px`);
-  el.style.setProperty("--life", `${life}ms`);
-  drop(el, life + 50);
-}
-
+/** An explosion on the effects canvas: a spark hit, a blast, or a fireball. */
 export function burst(x: number, y: number, size: number, kind: "hit" | "boom" | "big" = "hit") {
   if (reduced() && kind === "hit") return;
-  const sparks = kind === "hit" ? 6 : kind === "boom" ? 12 : 18;
-  let html = `<i class="b-flash"></i><i class="b-ring"></i>`;
-  for (let i = 0; i < sparks; i++) {
-    const angle = (360 / sparks) * i + Math.random() * 20;
-    const len = (0.6 + Math.random() * 0.6) * size;
-    html += `<i class="b-spark" style="--a:${angle}deg;--l:${len.toFixed(0)}px;--d:${(Math.random() * 80).toFixed(0)}ms"></i>`;
+  const k = size / 60;
+  if (kind === "hit") {
+    flash(x, y, size * 0.45, C.amber, 0.12);
+    sparks(x, y, { count: 7, color: C.amber, speed: 260 * k + 80, life: 0.32, size: 1.7 });
+    return;
   }
-  if (kind !== "hit") {
-    for (let i = 0; i < (kind === "big" ? 9 : 5); i++) {
-      const dx = (Math.random() * 2 - 1) * size * 0.5;
-      const dy = (Math.random() * 2 - 1) * size * 0.35;
-      html += `<i class="b-smoke" style="--x:${dx.toFixed(0)}px;--y:${dy.toFixed(0)}px;--s:${(0.6 + Math.random() * 0.8).toFixed(2)};--d:${(80 + Math.random() * 200).toFixed(0)}ms"></i>`;
-    }
-    html += `<i class="b-fire"></i>`;
+  const big = kind === "big";
+  flash(x, y, size * (big ? 0.9 : 0.7), big ? "#ffffff" : C.hot, big ? 0.22 : 0.16);
+  void ring(x, y, size * 0.1, size * (big ? 1.5 : 1.1), C.hot, big ? 0.5 : 0.36, big ? 5 : 3.5);
+  sparks(x, y, { count: big ? 28 : 14, color: C.amber, speed: (big ? 300 : 240) * k + 120, life: big ? 0.65 : 0.45, size: 2.1 });
+  for (let i = 0; i < (big ? 9 : 5); i++) {
+    glow(x + rnd(-0.3, 0.3) * size, y + rnd(-0.22, 0.22) * size, size * rnd(0.22, 0.4), i % 2 ? C.flame : C.hot, rnd(0.3, 0.55), size * 0.8);
   }
-  const el = spawn(`burst burst-${kind}`, x, y, html);
-  el.style.setProperty("--size", `${size}px`);
-  drop(el, kind === "hit" ? 700 : 1900);
+  for (let i = 0; i < (big ? 10 : 5); i++) {
+    smoke(x + rnd(-0.4, 0.4) * size, y + rnd(-0.3, 0.3) * size, size * rnd(0.4, 0.7), "#34373e", rnd(0.9, 1.4), { alpha: 0.55, delay: 0.05 + Math.random() * 0.18 });
+  }
 }
 
 function svgPath(d: string, cls: string): SVGPathElement {
@@ -152,123 +114,6 @@ function svgPath(d: string, cls: string): SVGPathElement {
   path.setAttribute("class", cls);
   svg.appendChild(path);
   return path;
-}
-
-type Pt = { x: number; y: number };
-
-function bezier(a: Pt, c: Pt, b: Pt, t: number): Pt {
-  const u = 1 - t;
-  return { x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y };
-}
-
-/**
- * Flies a missile along a lofted curve, laying a smoke trail behind it as it goes. `ka` and `kb`
- * scale the round at each end, so a shot heading into the frame shrinks and one coming at the
- * camera swells.
- */
-function missile(a: Pt, b: Pt, heavy: boolean, ka = 1, kb = 1): Promise<void> {
-  const side = (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 70);
-  const lift = heavy ? -110 : -40 - Math.random() * 50;
-  const c = { x: (a.x + b.x) / 2 + side, y: Math.min(a.y, b.y) + lift };
-  const dur = (heavy ? 560 : 420) * speed;
-  const start = { x: a.x, y: a.y + 6 };
-  muzzleFlash(start, (Math.atan2(c.y - a.y, c.x - a.x) * 180) / Math.PI, (heavy ? 1.4 : 1) * ka);
-  puff(start, "puff-launch", (heavy ? 34 : 24) * ka, 700);
-  const head = spawn(heavy ? "missile heavy" : "missile", 0, 0, "<i></i>");
-  const gap = heavy ? 7 : 9;
-  return new Promise((resolve) => {
-    const t0 = performance.now();
-    let last = start;
-    let lastPuff = start;
-    const frame = (now: number) => {
-      const k = Math.min(1, (now - t0) / dur);
-      const e = k ** 1.55;
-      const p = bezier(start, c, b, e);
-      const scale = ka + (kb - ka) * e;
-      const ang = Math.atan2(p.y - last.y, p.x - last.x);
-      head.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) rotate(${ang.toFixed(3)}rad) scale(${scale.toFixed(3)})`;
-      const run = Math.hypot(p.x - lastPuff.x, p.y - lastPuff.y);
-      for (let d = gap; d <= run; d += gap) {
-        const f = d / run;
-        puff({ x: lastPuff.x + (p.x - lastPuff.x) * f, y: lastPuff.y + (p.y - lastPuff.y) * f }, heavy ? "puff-heavy" : "puff-trail", (heavy ? 20 : 15) * scale, heavy ? 1300 : 1100);
-      }
-      if (run >= gap) lastPuff = { x: lastPuff.x + ((p.x - lastPuff.x) * Math.floor(run / gap) * gap) / run, y: lastPuff.y + ((p.y - lastPuff.y) * Math.floor(run / gap) * gap) / run };
-      last = p;
-      if (k < 1) requestAnimationFrame(frame);
-      else {
-        head.remove();
-        resolve();
-      }
-    };
-    requestAnimationFrame(frame);
-  });
-}
-
-async function tracer(a: { x: number; y: number }, b: { x: number; y: number }, ka = 1, kb = 1) {
-  const angle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
-  const dur = 190 * speed;
-  const rounds = 4;
-  let last: Promise<unknown> = Promise.resolve();
-  for (let i = 0; i < rounds; i++) {
-    const jx = (Math.random() * 2 - 1) * 14 * kb;
-    const jy = (Math.random() * 2 - 1) * 10 * kb;
-    window.setTimeout(() => muzzleFlash(a, angle, (0.8 + Math.random() * 0.4) * ka), i * 45 * speed);
-    const el = spawn("tracer", a.x, a.y);
-    el.style.transform = `rotate(${angle}deg) scale(${ka})`;
-    const anim = el.animate(
-      [
-        { transform: `translate(0,0) rotate(${angle}deg) scale(${ka.toFixed(2)})`, opacity: 1 },
-        { transform: `translate(${b.x - a.x + jx}px, ${b.y - a.y + jy}px) rotate(${angle}deg) scale(${kb.toFixed(2)})`, opacity: 1 },
-      ],
-      { duration: dur, delay: i * 45 * speed, easing: "linear", fill: "forwards" },
-    );
-    last = anim.finished.catch(() => undefined).then(() => el.remove());
-  }
-  await new Promise((resolve) => window.setTimeout(resolve, dur + 45 * speed));
-  void last;
-}
-
-async function zap(a: { x: number; y: number }, b: { x: number; y: number }) {
-  const pts: string[] = [];
-  const steps = 9;
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const x = a.x + (b.x - a.x) * t;
-    const y = a.y + (b.y - a.y) * t + (i === 0 || i === steps ? 0 : (Math.random() * 2 - 1) * 26);
-    pts.push(`${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`);
-  }
-  const bolt = svgPath(pts.join(" "), "zap");
-  const glow = svgPath(pts.join(" "), "zap-glow");
-  const frames = [{ opacity: 0 }, { opacity: 1 }, { opacity: 0.3 }, { opacity: 1 }, { opacity: 0 }];
-  bolt.animate(frames, { duration: 320 * speed, fill: "forwards" });
-  glow.animate(frames, { duration: 320 * speed, fill: "forwards" });
-  drop(bolt, 400 * speed);
-  drop(glow, 400 * speed);
-  await wait(150);
-}
-
-export type ShotStyle = "tracer" | "missile" | "heavy" | "zap";
-
-export async function shot(from: number, to: number, style: ShotStyle) {
-  const a = muzzle(from);
-  const b = center(to);
-  if (!a || !b) return;
-  if (reduced()) {
-    await wait(80);
-    return;
-  }
-  const ka = depth(from);
-  const kb = depth(to);
-  if (style === "tracer") {
-    sfx("cannon");
-    await tracer(a, b, ka, kb);
-  } else if (style === "zap") {
-    sfx("zap");
-    await zap(a, b);
-  } else {
-    sfx(style === "heavy" ? "heavy" : "missile");
-    await missile(a, b, style === "heavy", ka, kb);
-  }
 }
 
 /** Knocks an airframe along the line of fire when a hit lands, with a jolt of roll. */
@@ -282,10 +127,11 @@ function recoil(who: number, from: number, hard: boolean) {
   const dx = a && b ? b.x - a.x : 0;
   const dy = a && b ? b.y - a.y : -1;
   const len = Math.hypot(dx, dy) || 1;
-  const push = (hard ? 16 : 9) * Math.max(0.6, depth(who));
-  const roll = (Math.random() < 0.5 ? -1 : 1) * (hard ? 8 : 4);
-  const kick = `translate(${((dx / len) * push).toFixed(1)}px, ${((dy / len) * push).toFixed(1)}px) rotate(${roll}deg) scale(${dy < 0 ? 0.96 : 1.03})`;
-  art.animate([{ transform: "none" }, { transform: kick }, { transform: "none" }], { duration: 340, easing: "cubic-bezier(.2,.8,.3,1)" });
+  const push = (hard ? 18 : 9) * Math.max(0.6, depth(who));
+  const roll = (Math.random() < 0.5 ? -1 : 1) * (hard ? 9 : 4);
+  const kick = `translate(${((dx / len) * push).toFixed(1)}px, ${((dy / len) * push).toFixed(1)}px) rotate(${roll}deg) scale(${dy < 0 ? 0.95 : 1.04})`;
+  const back = `translate(${((-dx / len) * push * 0.25).toFixed(1)}px, ${((-dy / len) * push * 0.25).toFixed(1)}px) rotate(${-roll * 0.3}deg)`;
+  art.animate([{ transform: "none" }, { transform: kick, offset: 0.18 }, { transform: back, offset: 0.6 }, { transform: "none" }], { duration: hard ? 420 : 320, easing: "cubic-bezier(.2,.8,.3,1)" });
 }
 
 /** A one-frame white pop on the airframe; the player's jet flashes red instead. */
@@ -296,22 +142,40 @@ function hitFlash(who: number, hard: boolean) {
   }
 }
 
-/** Rough on-screen size of an airframe, for scaling explosions to how far away it is. */
-function blastScale(who: number): number {
-  return Math.max(0.45, Math.min(1.3, depth(who) * 1.15));
-}
-
 export function shake(power: number) {
   if (reduced() || power <= 0) return;
-  const p = Math.min(14, 3 + power * 0.6);
+  const p = Math.min(16, 3 + power * 0.65);
   const frames: Keyframe[] = [];
-  for (let i = 0; i < 7; i++) {
-    const k = 1 - i / 7;
-    frames.push({ transform: `translate(${((Math.random() * 2 - 1) * p * k).toFixed(1)}px, ${((Math.random() * 2 - 1) * p * k).toFixed(1)}px)` });
+  const steps = 8;
+  for (let i = 0; i < steps; i++) {
+    const k = (1 - i / steps) ** 1.5;
+    frames.push({ transform: `translate(${((Math.random() * 2 - 1) * p * k).toFixed(1)}px, ${((Math.random() * 2 - 1) * p * k).toFixed(1)}px) rotate(${((Math.random() * 2 - 1) * 0.25 * k).toFixed(2)}deg)` });
   }
-  frames.push({ transform: "translate(0,0)" });
+  frames.push({ transform: "none" });
   // The screen body clips its own overflow; shaking #app itself would flash page scrollbars.
-  (root.querySelector<HTMLElement>(".battle") ?? root).animate(frames, { duration: 380, easing: "ease-out" });
+  (root.querySelector<HTMLElement>(".battle") ?? root).animate(frames, { duration: 420, easing: "ease-out" });
+}
+
+/**
+ * Hit-stop: holds the whole fight still for a few frames when a heavy blow lands, then releases
+ * it with a small punch-in, so the hit reads as weight rather than as one more spark.
+ */
+export async function hitStop(ms: number) {
+  if (reduced()) return;
+  const battle = root.querySelector<HTMLElement>(".battle");
+  if (!battle) return;
+  freezeGfx(ms);
+  const running = battle.getAnimations({ subtree: true }).filter((anim) => anim.playState === "running");
+  for (const anim of running) anim.pause();
+  await new Promise((resolve) => window.setTimeout(resolve, ms));
+  for (const anim of running) {
+    try {
+      if (anim.playState === "paused") anim.play();
+    } catch {
+      /* the element was redrawn meanwhile */
+    }
+  }
+  root.querySelector<HTMLElement>(".stage")?.animate([{ scale: "1.022" }, { scale: "1" }], { duration: 260, easing: "cubic-bezier(.2,.8,.3,1)" });
 }
 
 function vignette(cls: string) {
@@ -324,7 +188,9 @@ function barrelRoll(who: number) {
   const art = artEl(who);
   if (!art || reduced()) return;
   const dir = Math.random() < 0.5 ? -1 : 1;
-  art.animate([{ rotate: "0deg" }, { rotate: `${dir * 360}deg` }], { duration: 620 * speed, easing: "cubic-bezier(.45,.05,.35,1)" });
+  art.animate([{ rotate: "0deg" }, { rotate: `${dir * 360}deg` }], { duration: 560 * timeScale(), easing: "cubic-bezier(.45,.05,.35,1)" });
+  const c = center(who);
+  if (c) void ring(c.x, c.y, 8, 60 * blastScale(who), C.ice, 0.4, 2);
 }
 
 /** A hard jink to one side, used when a shot is dodged. */
@@ -334,9 +200,53 @@ function jink(who: number) {
   const dir = Math.random() < 0.5 ? -1 : 1;
   const far = Math.max(24, art.getBoundingClientRect().width * 0.32);
   art.animate(
-    [{ transform: "none" }, { transform: `translate(${dir * far}px, -10px) rotate(${dir * 24}deg)` }, { transform: "none" }],
+    [{ transform: "none" }, { transform: `translate(${dir * far}px, -10px) rotate(${dir * 28}deg)`, offset: 0.35 }, { transform: `translate(${dir * far * 0.2}px, 0) rotate(${dir * -6}deg)`, offset: 0.8 }, { transform: "none" }],
     { duration: 460, easing: "cubic-bezier(.25,.8,.3,1)" },
   );
+  const r = rectOf(who);
+  if (r) for (let i = 0; i < 6; i++) smoke(r.left + r.width * (0.5 - dir * 0.4), r.top + r.height * 0.55 + i * 2, r.width * 0.05, "#ffffff", 0.4, { vx: -dir * rnd(40, 90), alpha: 0.4, delay: i * 0.015 });
+}
+
+/** A shield catching a hit: a bright arc on the side the fire came from, and a ring. */
+function shieldFlare(who: number, from: number) {
+  const r = rectOf(who);
+  const a = center(from);
+  if (!r || reduced()) return;
+  const p = midOf(r);
+  const ang = a ? Math.atan2(a.y - p.y, a.x - p.x) : Math.PI / 2;
+  const rx = r.width * 0.56;
+  const ry = Math.max(r.height * 0.8, r.width * 0.28);
+  void addEffect({
+    life: 0.34,
+    draw: (c, k) => {
+      c.globalCompositeOperation = "lighter";
+      c.strokeStyle = "#bff3ff";
+      c.lineCap = "round";
+      c.lineWidth = lerp(6, 1.5, k);
+      c.globalAlpha = (1 - k) ** 1.2;
+      c.beginPath();
+      c.ellipse(p.x, p.y, rx * (1 + k * 0.08), ry * (1 + k * 0.08), 0, ang - 1 + k * 0.2, ang + 1 - k * 0.2);
+      c.stroke();
+      c.strokeStyle = "#5fe3d6";
+      c.lineWidth = 1.5;
+      c.globalAlpha = (1 - k) * 0.6;
+      c.beginPath();
+      c.ellipse(p.x, p.y, rx, ry, 0, 0, Math.PI * 2);
+      c.stroke();
+    },
+  });
+  sparks(p.x + Math.cos(ang) * rx, p.y + Math.sin(ang) * ry, { count: 6, color: "#bff3ff", speed: 220, life: 0.25, size: 1.5 });
+}
+
+/** A quick rising glow on a unit for a gain: shield, heal, or a buff. */
+function gainFx(who: number, color: string, plus = false) {
+  const r = rectOf(who);
+  if (!r || reduced()) return;
+  const p = midOf(r);
+  void ring(p.x, p.y, r.width * 0.25, r.width * 0.62, color, 0.4, 2.5);
+  for (let i = 0; i < (plus ? 9 : 5); i++) {
+    emit({ kind: plus ? "glow" : "dot", x: r.left + r.width * rnd(0.2, 0.8), y: r.top + r.height * rnd(0.3, 0.8), vy: rnd(-110, -50), life: rnd(0.4, 0.7), size: plus ? rnd(3, 5) : rnd(1.6, 3), color, flicker: 0.4, delay: Math.random() * 0.12 });
+  }
 }
 
 /**
@@ -361,7 +271,7 @@ export async function camera(shot: CamShot): Promise<void> {
 
 /* ------------------------------------------------------------ dogfight */
 
-/** Attackers' break turns in flight, by uid; each resolves when that foe is settled on the six. */
+/** Attackers' swaps in flight, by uid; each resolves when that foe is settled on the six. */
 const flights = new Map<number, Promise<void>>();
 
 interface StageBox {
@@ -425,15 +335,15 @@ function rotated(x: number, y: number, deg: number): { x: number; y: number } {
 
 /** Vapour off the wingtips (or the tail, in profile) at a point along a flight. */
 function contrail(c: Pt, width: number, view: FlightView, dx: number, dy: number, roll: number) {
-  const size = Math.max(4, width * 0.045);
+  const size = Math.max(5, width * 0.06);
   if (view === "side") {
     const len = Math.hypot(dx, dy) || 1;
-    puff({ x: c.x - (dx / len) * width * 0.5, y: c.y - (dy / len) * width * 0.5 }, "puff-contrail", size * 1.3, 760);
+    smoke(c.x - (dx / len) * width * 0.5, c.y - (dy / len) * width * 0.5, size * 1.4, "#ffffff", 0.7, { alpha: 0.42, vx: 0, vy: 0 });
     return;
   }
   for (const sideOf of [-1, 1]) {
     const tip = rotated(sideOf * width * 0.45, width * 0.05, roll);
-    puff({ x: c.x + tip.x, y: c.y + tip.y }, "puff-contrail", size, 720);
+    smoke(c.x + tip.x, c.y + tip.y, size, "#ffffff", 0.62, { alpha: 0.4, vx: 0, vy: 0 });
   }
 }
 
@@ -442,20 +352,39 @@ function zip(c: Pt, width: number, dx: number, dy: number) {
   const len = Math.hypot(dx, dy) || 1;
   const across = (Math.random() * 2 - 1) * width * 0.4;
   const back = width * (0.2 + Math.random() * 0.3);
-  const x = c.x - (dx / len) * back - (dy / len) * across;
-  const y = c.y - (dy / len) * back + (dx / len) * across;
-  const el = spawn("zip", x, y, "<i></i>");
-  el.style.transform = `rotate(${Math.atan2(dy, dx).toFixed(3)}rad)`;
-  el.style.setProperty("--len", `${(width * (0.5 + Math.random() * 0.6)).toFixed(0)}px`);
-  drop(el, 420);
+  const v = 420 + width * 2;
+  emit({
+    kind: "spark",
+    x: c.x - (dx / len) * back - (dy / len) * across,
+    y: c.y - (dy / len) * back + (dx / len) * across,
+    vx: (-dx / len) * v,
+    vy: (-dy / len) * v,
+    g: 0,
+    drag: 0.05,
+    life: 0.2,
+    size: 1.6,
+    color: "#ffffff",
+    stretch: 0.11,
+    alpha: 0.55,
+  });
 }
 
+type Pace = "out" | "in" | "through";
+
+const PACE: Record<Pace, (k: number) => number> = {
+  // Leaving: it accelerates away.
+  out: (k) => k ** 2.1,
+  // Arriving: fast in, easing onto the mark.
+  in: (k) => 1 - (1 - k) ** 2.4,
+  through: (k) => (k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2),
+};
+
 /**
- * Flies a foe along a curve in stage percentages, growing from `from.s` to `to.s` pixels by how
- * near the camera it comes, swapping between rear, profile, and front-quarter paintings as its
+ * Flies a foe along a curve in stage percentages, sized by how near the camera it comes between
+ * the `a` and `b` spots, swapping between rear, profile, and front-quarter paintings as its
  * heading turns, banking into the turn, and trailing vapour and speed streaks.
  */
-function fly(foe: HTMLElement, curve: Curve, from: Spot, to: Spot, ms: number, box: StageBox): Promise<void> {
+function fly(foe: HTMLElement, curve: Curve, a: Spot, b: Spot, ms: number, box: StageBox, pace: Pace): Promise<void> {
   const art = foe.querySelector<HTMLElement>(".unit-art");
   foe.classList.add("flying", "in-flight");
   return new Promise((resolve) => {
@@ -465,24 +394,24 @@ function fly(foe: HTMLElement, curve: Curve, from: Spot, to: Spot, ms: number, b
     let lastZip = 0;
     const step = (now: number) => {
       if (!foe.isConnected) return resolve();
-      const k = Math.min(1, (now - start) / Math.max(1, ms * speed));
-      const t = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+      const k = Math.min(1, (now - start) / Math.max(1, ms * timeScale()));
+      const t = Math.max(0, Math.min(1, PACE[pace](k)));
       const p = cubic(curve, t);
       const d = cubicTangent(curve, Math.min(0.995, Math.max(0.005, t)));
       const dx = d.x * box.rect.width;
       const dy = d.y * box.rect.height;
       view = flightView(dx, dy, view);
       showView(foe, view, mirrored(view, dx));
-      const width = sizeAlong(from, to, p.y);
+      const width = sizeAlong(a, b, p.y);
       placeFoe(foe, p, width);
       const roll = attitude(view, dx, dy);
       if (art) art.style.rotate = `${roll.toFixed(1)}deg`;
       const c = { x: box.rect.left + (p.x / 100) * box.rect.width, y: box.rect.top + (p.y / 100) * box.rect.height };
-      if (!lastTrail || Math.hypot(c.x - lastTrail.x, c.y - lastTrail.y) > 11) {
+      if (!lastTrail || Math.hypot(c.x - lastTrail.x, c.y - lastTrail.y) > 12) {
         contrail(c, width, view, dx, dy, roll);
         lastTrail = c;
       }
-      if (now - lastZip > 50 && k > 0.05 && k < 0.95) {
+      if (now - lastZip > 45 && k > 0.05 && k < 0.95) {
         zip(c, width, dx, dy);
         lastZip = now;
       }
@@ -503,11 +432,20 @@ function threatTag(text: string, six: boolean) {
   tag.classList.toggle("six", six);
 }
 
+/** How far past the stage edge, in percent of its width, a sprite's centre must be to be out of sight. */
+function offBy(width: number, box: StageBox): number {
+  return ((width * 0.62) / box.rect.width) * 100 + 3;
+}
+
+/** Timings of the swap, in ms: each leg, and the beat the foe spends out of sight between them. */
+export const SWAP = { out: 380, beat: 120, onto: 500, away: 340, back: 420, stagger: 160 };
+
 /**
- * Sends each attacker on a break turn round onto the player's six, starting `delay` ms from now
- * and staggered so a pair arrive one after the other. Their shots wait on `onSix`.
+ * Sends each attacker round onto the player's six, starting `delay` ms from now and staggered so
+ * a pair arrive one after the other: out past the edge of the screen, a beat out of sight, then
+ * back in from that side onto the six. Their shots wait on `onSix`.
  */
-export function breakTurns(attackers: number[], shape: CamShape, delay = 80, stagger = 200) {
+export function breakTurns(attackers: number[], shape: CamShape, delay = 60, stagger = SWAP.stagger) {
   flights.clear();
   const box = stageBox();
   if (!box) return;
@@ -519,9 +457,10 @@ export function breakTurns(attackers: number[], shape: CamShape, delay = 80, sta
     foes.map((foe) => foe.el.classList.contains("boss")),
     shape,
   );
+  const aspect = box.rect.width / box.rect.height;
   foes.forEach(({ uid, el }, index) => {
-    const aspect = Number(el.style.getPropertyValue("--box")) || 2.4;
-    const target: Spot = { x: six[index].x, y: six[index].y, s: Math.min(six[index].s * box.u, aspect * box.rect.height * 0.3) };
+    const boxAspect = Number(el.style.getPropertyValue("--box")) || 2.4;
+    const target: Spot = { x: six[index].x, y: six[index].y, s: Math.min(six[index].s * box.u, boxAspect * box.rect.height * 0.3) };
     const flight = wait(delay + index * stagger).then(async () => {
       if (!el.isConnected || el.classList.contains("crashing")) return;
       const from = spotNow(el, box);
@@ -531,12 +470,18 @@ export function breakTurns(attackers: number[], shape: CamShape, delay = 80, sta
         placeFoe(el, target, target.s);
       } else {
         const side = from.x < 49 ? -1 : from.x > 51 ? 1 : index % 2 ? 1 : -1;
+        const [exit, entry] = swapIn(from, target, side, offBy(target.s, box), aspect);
+        sfx("flyby");
+        await fly(el, exit, from, target, SWAP.out, box, "out");
+        await wait(SWAP.beat);
+        if (!el.isConnected) return;
         sfx("whoosh");
-        await fly(el, breakTurn(from, target, side, box.rect.width / box.rect.height), from, target, 820, box);
+        await fly(el, entry, from, target, SWAP.onto, box, "in");
         showView(el, "rear", false);
         const art = el.querySelector<HTMLElement>(".unit-art");
         if (art) art.style.rotate = "0deg";
       }
+      if (!root.querySelector(".threat-tag.six")) sfx("lock");
       threatTag("Bandits on your six", true);
     });
     flights.set(uid, flight);
@@ -548,7 +493,10 @@ export function onSix(uid: number): Promise<void> {
   return flights.get(uid) ?? Promise.resolve();
 }
 
-/** The overshoot: every foe on the six pulls up past the player and back into its slot ahead. */
+/**
+ * The way back: every foe on the six pulls ahead past the player and off the edge of the screen,
+ * then comes back in from that side into its slot ahead.
+ */
 export async function disengage(): Promise<void> {
   const box = stageBox();
   const runs = [...flights.keys()];
@@ -556,6 +504,7 @@ export async function disengage(): Promise<void> {
   flights.clear();
   threatTag("Bandits inbound", false);
   if (!box) return;
+  const aspect = box.rect.width / box.rect.height;
   await Promise.all(
     runs.map(async (uid, index) => {
       const el = unitEl(uid);
@@ -566,39 +515,24 @@ export async function disengage(): Promise<void> {
       }
       const from = spotNow(el, box);
       const to = closeSlot(el, box);
+      const side = to.x < 49 ? -1 : to.x > 51 ? 1 : from.x < 50 ? -1 : 1;
+      const [exit, entry] = swapOut(from, to, side, offBy(Math.max(from.s, to.s), box), aspect);
       await wait(index * 70);
-      await fly(el, overshoot(from, to, from.x < 50 ? -1 : 1), from, to, 640, box);
+      sfx("flyby");
+      await fly(el, exit, from, to, SWAP.away, box, "out");
+      await wait(SWAP.beat);
+      if (!el.isConnected) return;
+      await fly(el, entry, from, to, SWAP.back, box, "in");
       landFoe(el);
     }),
   );
 }
 
+/* ----------------------------------------------------------- shoot-down */
+
 function flashScreen() {
   if (reduced()) return;
   drop(spawn("flash-screen", 0, 0), 260);
-}
-
-function debris(c: Pt, count: number) {
-  if (reduced()) return;
-  for (let i = 0; i < count; i++) {
-    const el = spawn("shard", c.x, c.y);
-    const w = 4 + Math.random() * 8;
-    el.style.width = `${w.toFixed(0)}px`;
-    el.style.height = `${(2 + Math.random() * 4).toFixed(0)}px`;
-    const dx = (Math.random() * 2 - 1) * 170;
-    const up = -40 - Math.random() * 110;
-    const spin = (Math.random() * 2 - 1) * 720;
-    const life = 900 + Math.random() * 500;
-    el.animate(
-      [
-        { transform: "translate(0,0) rotate(0deg)", opacity: 1 },
-        { transform: `translate(${(dx * 0.55).toFixed(0)}px, ${up.toFixed(0)}px) rotate(${(spin * 0.4).toFixed(0)}deg)`, opacity: 1, offset: 0.35 },
-        { transform: `translate(${dx.toFixed(0)}px, ${(up + 230).toFixed(0)}px) rotate(${spin.toFixed(0)}deg)`, opacity: 0 },
-      ],
-      { duration: life, easing: "cubic-bezier(.25,.6,.55,1)", fill: "forwards" },
-    );
-    drop(el, life + 50);
-  }
 }
 
 /** Trails dark smoke and the odd flare-up behind a jet while its crash animation plays. */
@@ -606,19 +540,22 @@ function smokeFollow(who: number, ms: number) {
   if (reduced()) return;
   const art = artEl(who);
   if (!art) return;
-  const t0 = performance.now();
+  let since = 0;
   let n = 0;
-  const timer = window.setInterval(() => {
-    const r = art.getBoundingClientRect();
-    if (performance.now() - t0 > ms || !r.width) {
-      window.clearInterval(timer);
-      return;
-    }
-    const p = { x: r.left + r.width * 0.4, y: r.top + r.height * 0.5 };
-    puff(p, "puff-dark", 26 + Math.random() * 18, 1300);
-    if (n % 4 === 1) burst(p.x + r.width * 0.15, p.y, 30, "hit");
-    n += 1;
-  }, 70);
+  void addEffect({
+    life: ms / 1000,
+    draw: (_c, _k, age) => {
+      if (age - since < 0.04) return;
+      since = age;
+      const r = art.getBoundingClientRect();
+      if (!r.width) return;
+      const p = { x: r.left + r.width * 0.45, y: r.top + r.height * 0.5 };
+      smoke(p.x, p.y, 30 + Math.random() * 18, "#2c2e34", 1.2, { alpha: 0.6 });
+      glow(p.x, p.y, 12 + Math.random() * 8, C.flame, 0.2);
+      if (n % 5 === 2) burst(p.x + r.width * 0.12, p.y, 34, "hit");
+      n += 1;
+    },
+  });
 }
 
 async function shootDown(who: number, pendingDown: Set<number>) {
@@ -628,26 +565,28 @@ async function shootDown(who: number, pendingDown: Set<number>) {
   if (c) {
     flashScreen();
     burst(c.x, c.y, 130 * k, "big");
-    const ring = spawn("shock", c.x, c.y);
-    ring.style.setProperty("--k", k.toFixed(2));
-    drop(ring, 700);
-    debris(c, 14);
-    window.setTimeout(() => burst(c.x + 40 * k, c.y - 18 * k, 70 * k, "boom"), 160);
-    window.setTimeout(() => {
+    void ring(c.x, c.y, 10, 220 * k, "#ffffff", 0.5, 4, 0.04);
+    shards(c.x, c.y, 16, "#3d434c", 380 * k + 80, 9 * k + 3);
+    shards(c.x, c.y, 6, C.flame, 300 * k + 60, 5 * k + 2);
+    later(150, () => burst(c.x + 40 * k, c.y - 18 * k, 70 * k, "boom"));
+    later(500, () => {
       const p = center(who);
       if (p) burst(p.x - 20 * k, p.y + 10 * k, 60 * k, "boom");
       sfx("hit");
-    }, 520);
+    });
   }
-  shake(12);
   const unit = unitEl(who);
   if (unit) {
     unit.classList.add("crashing");
     smokeFollow(who, 1050);
     if (pendingDown.has(who)) window.setTimeout(() => unit.classList.add("down"), 1100);
   }
-  await wait(420);
+  await hitStop(110);
+  shake(13);
+  await wait(330);
 }
+
+/* ---------------------------------------------------------------- bars */
 
 export function setBar(who: number, hp: number, shield: number) {
   const bar = root.querySelector<HTMLElement>(`[data-bar="${who}"]`);
@@ -677,9 +616,25 @@ export function snapBars(values: Map<number, { hp: number; shield: number }>) {
   }
 }
 
+/** Restarts a one-shot CSS animation class on an element. */
+function rekick(el: Element | null, cls: string) {
+  if (!el) return;
+  el.classList.remove(cls);
+  void (el as HTMLElement).offsetWidth;
+  el.classList.add(cls);
+}
+
+function barKick(who: number, cls: "hurt" | "mend" | "guard") {
+  rekick(root.querySelector(`[data-bar="${who}"]`), cls);
+}
+
+function statusRow(who: number): HTMLElement | null {
+  return who === PLAYER ? root.querySelector<HTMLElement>(".pilot .st-row") : unitEl(who)?.querySelector<HTMLElement>(".st-row") ?? null;
+}
+
 export function banner(text: string, sub: string, cls = ""): Promise<void> {
-  const el = spawn(`banner ${cls}`, 0, 0, `<div class="banner-inner"><b>${text}</b>${sub ? `<small>${sub}</small>` : ""}</div>`);
-  const life = cls.includes("short") ? 1000 : 1700;
+  const el = spawn(`banner ${cls}`, 0, 0, `<div class="banner-inner"><i class="banner-streak"></i><b>${text}</b>${sub ? `<small>${sub}</small>` : ""}</div>`);
+  const life = cls.includes("short") ? 820 : 1400;
   drop(el, life);
   const final = cls.includes("win") || cls.includes("loss");
   return final ? new Promise((resolve) => window.setTimeout(resolve, life)) : wait(life * 0.7);
@@ -692,11 +647,7 @@ export function wipe() {
 }
 
 export function pulse(selector: string, cls: string) {
-  const el = root.querySelector<HTMLElement>(selector);
-  if (!el) return;
-  el.classList.remove(cls);
-  void el.offsetWidth;
-  el.classList.add(cls);
+  rekick(root.querySelector<HTMLElement>(selector), cls);
 }
 
 /* ------------------------------------------------------------- timeline */
@@ -714,15 +665,36 @@ const STATUS_WORD: Record<string, string> = {
   energy: "Energy",
 };
 
+const STATUS_TINT: Record<string, string> = {
+  evasion: C.cyan,
+  locked: C.red,
+  jam: C.magenta,
+  burn: C.flame,
+  thrust: C.gold,
+  armor: C.steel,
+  plating: C.bronze,
+  suppress: C.violet,
+  static: C.violet,
+  energy: C.gold,
+};
+
 export interface PlayContext {
-  /** How shots fired by the player travel during this action. */
-  playerShot: ShotStyle;
+  /** The card being played, whose recipe draws the player's shots. Absent for turn events. */
+  card?: string;
+  /** True for a card that hits every enemy: its shots at each target fly together. */
+  salvo?: boolean;
   bars: Map<number, { hp: number; shield: number }>;
   /** Foes that were alive before the action and are already drawn as down. */
   pendingDown: Set<number>;
 }
 
-function enemyShot(amount: number, index: number): ShotStyle {
+/** Shot and impact for the player's damage that does not come from a card's own shot. */
+const PASSIVE_SHOT: Shot = { fx: "bolt", color: C.radar, forks: 1, ms: 200, sfx: "zap" };
+const PASSIVE_IMPACT: Impact = { fx: "sparks", color: C.radar };
+
+type EnemyStyle = "tracer" | "missile" | "heavy";
+
+function enemyStyle(amount: number, index: number): EnemyStyle {
   if (amount >= 14) return "heavy";
   return index % 2 ? "tracer" : amount >= 8 ? "missile" : "tracer";
 }
@@ -730,70 +702,125 @@ function enemyShot(amount: number, index: number): ShotStyle {
 export async function playEvents(events: CombatFx[], ctx: PlayContext) {
   let lastFrom = Number.NaN;
   let volley = 0;
-  for (const event of events) {
+  let cardHits = 0;
+  const anim = ctx.card ? cardAnim(ctx.card) : null;
+  const shotOf = anim?.shot ?? PASSIVE_SHOT;
+  const impactOf = anim?.shot ? anim.impact ?? PASSIVE_IMPACT : PASSIVE_IMPACT;
+  const prefired = new Set<number>();
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
     if (event.t === "hit") {
       const sameVolley = event.from === lastFrom;
       volley = sameVolley ? volley + 1 : 0;
       lastFrom = event.from;
-      const style = event.from === PLAYER ? ctx.playerShot : enemyShot(event.amount + event.blocked, volley);
-      await shot(event.from, event.who, style);
-      const c = center(event.who);
-      const heavy = event.amount >= 12 || style === "heavy";
-      const k = blastScale(event.who);
-      if (c) burst(c.x + (Math.random() * 30 - 15) * k, c.y + (Math.random() * 20 - 10) * k, (heavy ? 70 : 40) * k, heavy ? "boom" : "hit");
+      let impact: Impact;
+      let heavyShot = false;
+      if (event.from === PLAYER) {
+        impact = impactOf;
+        heavyShot = impact.fx === "fireball";
+        if (!prefired.has(i)) {
+          if (ctx.salvo) {
+            // One wave of an all-enemies card: every target's shot flies at once.
+            const wave = [i];
+            const seen = new Set([event.who]);
+            for (let j = i + 1; j < events.length; j++) {
+              const next = events[j];
+              if (next.t === "turn" || next.t === "move") break;
+              if (next.t !== "hit" || next.from !== PLAYER) continue;
+              if (seen.has(next.who)) break;
+              seen.add(next.who);
+              wave.push(j);
+            }
+            const base = cardHits;
+            cardHits += wave.length;
+            for (const j of wave) prefired.add(j);
+            await Promise.all(wave.map((j, n) => fireShot(shotOf, PLAYER, (events[j] as { who: number }).who, base + n)));
+          } else {
+            await fireShot(shotOf, PLAYER, event.who, cardHits);
+            cardHits += 1;
+          }
+        } else await wait(50);
+      } else {
+        const style = enemyStyle(event.amount + event.blocked, volley);
+        impact = ENEMY_IMPACT[style];
+        heavyShot = style === "heavy";
+        await fireShot(enemyShot(style), event.from, event.who, volley);
+      }
+      const heavy = event.amount >= 12 || (heavyShot && event.amount > 0);
+      const crit = event.amount >= 15;
       ctx.bars.set(event.who, { hp: event.hp, shield: event.shield });
       setBar(event.who, event.hp, event.shield);
+      if (event.blocked > 0) shieldFlare(event.who, event.from);
       if (event.amount > 0) {
+        playImpact(impact, event.who, event.from, heavy ? 1.2 : 1);
         recoil(event.who, event.from, heavy);
-        sfx(heavy ? "hitBig" : "hit");
-        const crit = event.amount >= 15 ? " dmg-crit" : "";
-        floatText(event.who, String(event.amount), event.who === PLAYER ? `dmg dmg-player${crit}` : heavy ? `dmg dmg-big${crit}` : "dmg");
+        barKick(event.who, "hurt");
+        sfx(crit ? "crit" : heavy ? "hitBig" : "hit");
+        floatText(event.who, String(event.amount), event.who === PLAYER ? `dmg dmg-player${crit ? " dmg-crit" : ""}` : heavy ? `dmg dmg-big${crit ? " dmg-crit" : ""}` : "dmg");
         if (event.who === PLAYER) {
           sfx("hurt");
           vignette("hurt");
-          shake(event.amount >= 8 ? event.amount : 0);
-        } else shake(heavy ? event.amount * 0.5 : 0);
+        }
+        if (heavy) {
+          await hitStop(crit ? 120 : 80);
+          shake(event.who === PLAYER ? event.amount : event.amount * 0.6);
+        } else if (event.who === PLAYER) shake(event.amount >= 6 ? event.amount : 0);
       } else if (event.blocked > 0) {
         floatText(event.who, "Blocked", "dmg-blocked");
+        barKick(event.who, "guard");
         sfx("block");
       }
       if (event.blocked > 0 && event.amount > 0) pulseShield(event.who);
-      await wait(style === "tracer" ? 70 : 110);
+      await wait(shotOf.fx === "tracer" && event.from === PLAYER ? 50 : 100);
     } else if (event.t === "evade") {
-      const dodge = shot(event.from, event.who, "missile");
-      window.setTimeout(() => jink(event.who), 180 * speed);
+      const dodge = fireShot(enemyShot("missile"), event.from, event.who, volley);
+      later(180, () => jink(event.who));
       await dodge;
       floatText(event.who, "Evaded", "evade");
       sfx("evade");
-      await wait(120);
+      await wait(110);
     } else if (event.t === "burn") {
       ctx.bars.set(event.who, { hp: event.hp, shield: ctx.bars.get(event.who)?.shield ?? 0 });
       setBar(event.who, event.hp, ctx.bars.get(event.who)?.shield ?? 0);
-      if (event.amount > 0) floatText(event.who, String(event.amount), "dmg dmg-burn");
-      const c = center(event.who);
-      if (c) burst(c.x, c.y, 34 * blastScale(event.who), "hit");
+      if (event.amount > 0) {
+        floatText(event.who, String(event.amount), "dmg dmg-burn");
+        barKick(event.who, "hurt");
+      }
+      playImpact({ fx: "embers", color: C.flame }, event.who, event.who, 0.8);
       if (event.who === PLAYER && event.amount > 0) vignette("burn");
-      await wait(220);
+      await wait(200);
     } else if (event.t === "shield") {
       const prev = ctx.bars.get(event.who);
       ctx.bars.set(event.who, { hp: prev?.hp ?? 0, shield: event.shield });
       if (prev) setBar(event.who, prev.hp, event.shield);
       floatText(event.who, `+${event.amount}`, "gain-shield");
       pulseShield(event.who);
+      barKick(event.who, "guard");
+      if (event.who !== PLAYER || !anim) gainFx(event.who, C.cyan);
       sfx("shield");
-      await wait(160);
+      await wait(140);
     } else if (event.t === "heal") {
       const prev = ctx.bars.get(event.who);
       ctx.bars.set(event.who, { hp: event.hp, shield: prev?.shield ?? 0 });
       setBar(event.who, event.hp, prev?.shield ?? 0);
       floatText(event.who, `+${event.amount}`, "gain-heal");
+      barKick(event.who, "mend");
+      gainFx(event.who, C.heal, true);
       sfx("heal");
-      await wait(180);
+      await wait(160);
     } else if (event.t === "status") {
       const word = STATUS_WORD[event.k] ?? event.k;
       floatText(event.who, `${event.n > 0 ? "+" : ""}${event.n} ${word}`, `st-float st-${event.k}`);
-      if (event.k === "energy") pulse(".energy-orb", "gain");
-      await wait(140);
+      if (event.k === "energy") {
+        pulse(".energy-orb", "gain");
+        sfx("energy");
+        const orb = rectOfSel(".energy-orb");
+        if (orb && !reduced()) void ring(orb.left + orb.width / 2, orb.top + orb.height / 2, orb.width * 0.3, orb.width * 0.85, C.gold, 0.4, 3);
+      } else {
+        rekick(statusRow(event.who)?.querySelector(`.st-${event.k}`) ?? null, "pop");
+        if (event.who !== PLAYER || !anim) gainFx(event.who, STATUS_TINT[event.k] ?? C.gold);
+      }
+      await wait(120);
     } else if (event.t === "move") {
       lastFrom = Number.NaN;
       const unit = unitEl(event.uid);
@@ -805,7 +832,7 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       } else {
         floatText(event.uid, event.name, "move-name");
         if (event.kind !== "attack" && event.kind !== "mixed") barrelRoll(event.uid);
-        await wait(event.kind === "attack" ? 300 : 360);
+        await wait(event.kind === "attack" ? 280 : 340);
       }
       window.setTimeout(() => unit?.classList.remove("acting"), 700);
     } else if (event.t === "down") {
@@ -813,7 +840,10 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
     } else if (event.t === "phase") {
       floatText(event.uid, event.text, "phase-float");
       const c = center(event.uid);
-      if (c) burst(c.x, c.y, 90, "boom");
+      if (c) {
+        burst(c.x, c.y, 90, "boom");
+        void ring(c.x, c.y, 20, 240, C.red, 0.6, 5);
+      }
       sfx("boss");
       shake(6);
       await wait(500);
@@ -824,53 +854,188 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
 }
 
 function pulseShield(who: number) {
-  const badge = root.querySelector<HTMLElement>(`[data-bar="${who}"] .bar-shield`);
-  badge?.animate([{ transform: "scale(1.5)" }, { transform: "scale(1)" }], { duration: 300, easing: "ease-out" });
+  rekick(root.querySelector<HTMLElement>(`[data-bar="${who}"] .bar-shield`), "pop");
 }
 
 /* ----------------------------------------------------------------- cards */
 
-const SPARK: Record<string, string> = { attack: "#ff9a52", maneuver: "#5fe3d6", system: "#c79cff", burden: "#b0a090" };
+const TINT: Record<string, string> = { attack: "#ff9a52", maneuver: "#5fe3d6", system: "#c79cff", burden: "#b0a090" };
 
-/** Pops a copy of the played card up out of the hand and sends it streaking into its target. */
-export function throwCard(snapshot: { html: string; rect: DOMRect; rot: number }, attack: boolean, target: number | null, type: string) {
-  sfx("play");
-  if (reduced()) return;
+export interface CardSnap {
+  html: string;
+  /** The card's own box, before the fan's rotation. */
+  rect: DOMRect;
+  rot: number;
+  /** A phone hand's cropped card. */
+  mini: boolean;
+}
+
+/** A hand slot's card as it looks now, to animate after the hand has been redrawn. */
+export function snapCard(slot: HTMLElement): CardSnap | undefined {
+  const card = slot.querySelector<HTMLElement>(".card");
+  if (!card) return undefined;
+  const box = card.getBoundingClientRect();
+  const lifted = slot.classList.contains("hover") || slot.classList.contains("dragging");
+  const mini = !!slot.closest(".hand.mini") && !slot.classList.contains("hover");
+  const rot = lifted ? 0 : Number.parseFloat(slot.style.getPropertyValue("--r")) || 0;
+  if (lifted) return { html: card.outerHTML, rect: box, rot, mini };
+  // The bounding box of a fanned card is wider than the card: rebuild its own box about the centre.
+  const w = card.offsetWidth;
+  const h = card.offsetHeight;
+  return { html: card.outerHTML, rect: new DOMRect(box.left + box.width / 2 - w / 2, box.top + box.height / 2 - h / 2, w, h), rot, mini };
+}
+
+function ghost(snap: CardSnap): HTMLElement {
   const el = document.createElement("div");
-  el.className = "card-ghost";
-  el.innerHTML = snapshot.html;
-  const r = snapshot.rect;
+  el.className = snap.mini ? "card-ghost hand mini" : "card-ghost";
+  el.innerHTML = `<div class="slot">${snap.html}</div>`;
+  const r = snap.rect;
   el.style.left = `${r.left}px`;
   el.style.top = `${r.top}px`;
   el.style.width = `${r.width}px`;
-  el.style.height = `${r.width * 1.4}px`;
+  el.style.height = `${r.height}px`;
   el.style.setProperty("--cw", `${r.width}px`);
+  el.style.setProperty("--ch", `${r.height}px`);
   layer.appendChild(el);
-  const from = { x: r.left + r.width / 2, y: r.top + (r.width * 1.4) / 2 };
-  const end = (target !== null ? center(target) : null) ?? { x: window.innerWidth / 2, y: window.innerHeight * (attack ? 0.32 : 0.4) };
-  const tx = end.x - from.x;
-  const ty = end.y - from.y;
-  const life = 480;
+  return el;
+}
+
+/**
+ * The played card lifts out of the hand, flares in its type's colour, and pours into the player's
+ * jet as a stream of sparks. A card that exhausts burns away from the bottom up instead.
+ */
+export function throwCard(snap: CardSnap, type: string, exhaust: boolean) {
+  sfx("play");
+  if (reduced()) return;
+  const el = ghost(snap);
+  const tint = TINT[type] ?? "#ffd36a";
+  el.style.setProperty("--tint", tint);
+  const r = snap.rect;
+  const from = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  const lift = Math.min(70, r.height * 0.4);
+  const jet = center(PLAYER) ?? { x: window.innerWidth / 2, y: window.innerHeight * 0.45 };
+  const speed = timeScale();
+  if (exhaust) {
+    sfx("exhaust");
+    el.classList.add("burning");
+    el.animate(
+      [
+        { transform: `translate(0,0) rotate(${snap.rot}deg) scale(1)`, clipPath: "inset(0 0 0 0)", filter: "brightness(1)" },
+        { transform: `translate(0, ${-lift}px) rotate(0deg) scale(1.12)`, clipPath: "inset(0 0 0 0)", filter: "brightness(1.3)", offset: 0.24 },
+        { transform: `translate(0, ${-lift - 26}px) rotate(-2deg) scale(1.1)`, clipPath: "inset(0 0 100% 0)", filter: "brightness(.5) sepia(1) saturate(4) hue-rotate(-20deg)" },
+      ],
+      { duration: 560 * speed, easing: "cubic-bezier(.3,.6,.4,1)", fill: "forwards" },
+    );
+    drop(el, 560 * speed + 40);
+    void addEffect({
+      life: 0.42,
+      delay: 0.13,
+      draw: (_c, k) => {
+        // The burn line climbs the card, shedding embers.
+        const y = r.bottom - lift - r.height * 1.1 * k;
+        for (let i = 0; i < 2; i++) {
+          const x = r.left + Math.random() * r.width;
+          emit({ kind: "glow", x, y, vx: rnd(-30, 30), vy: rnd(-120, -40), g: -80, life: rnd(0.3, 0.6), size: rnd(3, 6), color: i ? C.flame : C.hot, flicker: 0.5 });
+        }
+        if (Math.random() < 0.4) smoke(r.left + Math.random() * r.width, y, 18, "#2e2a28", 0.6, { alpha: 0.4, vy: -70 });
+      },
+    });
+    return;
+  }
+  const tx = jet.x - from.x;
+  const ty = jet.y - from.y;
   el.animate(
     [
-      { transform: `translate(0,0) rotate(${snapshot.rot}deg) scale(1)`, opacity: 1, filter: "brightness(1)" },
-      { transform: `translate(${(tx * 0.08).toFixed(0)}px, -48px) rotate(0deg) scale(1.14)`, opacity: 1, filter: "brightness(1.35)", offset: 0.3 },
-      { transform: `translate(${tx.toFixed(0)}px, ${ty.toFixed(0)}px) rotate(${attack ? 10 : -10}deg) scale(.2)`, opacity: 0.2, filter: "brightness(2.8) blur(1px)" },
+      { transform: `translate(0,0) rotate(${snap.rot}deg) scale(1)`, opacity: 1, filter: "brightness(1)" },
+      { transform: `translate(0, ${-lift * 0.86}px) rotate(${(-snap.rot * 0.2).toFixed(1)}deg) scale(1.2)`, opacity: 1, filter: "brightness(1.2)", offset: 0.26, easing: "cubic-bezier(.3,0,.2,1)" },
+      { transform: `translate(0, ${-lift}px) rotate(0deg) scale(1.15)`, opacity: 1, filter: "brightness(1.6)", offset: 0.44, easing: "cubic-bezier(.6,0,.9,.4)" },
+      { transform: `translate(${(tx * 0.6).toFixed(0)}px, ${(ty * 0.6 - lift * 0.4).toFixed(0)}px) rotate(${tx < 0 ? -14 : 14}deg) scale(.1)`, opacity: 0, filter: "brightness(3.2)" },
     ],
-    { duration: life, easing: "cubic-bezier(.35,.1,.45,1)", fill: "forwards" },
+    { duration: 330 * speed, fill: "forwards" },
   );
-  drop(el, life + 40);
-  window.setTimeout(() => {
-    const spark = spawn("card-spark", end.x, end.y);
-    spark.style.setProperty("--c", SPARK[type] ?? "#ffd36a");
-    drop(spark, 600);
-  }, life - 60);
+  drop(el, 330 * speed + 40);
+  later(130, () => {
+    const o = { x: from.x, y: from.y - lift };
+    flash(o.x, o.y, r.width * 0.55, tint, 0.14);
+    const n = 12;
+    for (let i = 0; i < n; i++) {
+      const a = { x: o.x + rnd(-0.4, 0.4) * r.width, y: o.y + rnd(-0.4, 0.4) * r.height };
+      const life = rnd(0.16, 0.26);
+      emit({ kind: "spark", x: a.x, y: a.y, vx: (jet.x - a.x) / life, vy: (jet.y - a.y) / life, g: 0, life, size: rnd(1.6, 2.8), color: i % 3 ? tint : "#ffffff", stretch: 0.05, delay: i * 0.008 });
+    }
+  });
+  later(300, () => {
+    const p = center(PLAYER);
+    const jr = rectOf(PLAYER);
+    if (!p || !jr) return;
+    glow(p.x, p.y, jr.width * 0.34, tint, 0.26, 0, 0.7);
+    void ring(p.x, p.y, jr.width * 0.12, jr.width * 0.5, tint, 0.3, 2.5);
+  });
+}
+
+/** The cards left in hand at end of turn fly to the discard pile. */
+export function discardHand(snaps: CardSnap[]) {
+  const pile = rectOfSel(".pile-discard");
+  if (!pile || reduced() || !snaps.length) return;
+  const to = midOf(pile);
+  const speed = timeScale();
+  snaps.forEach((snap, i) => {
+    const el = ghost(snap);
+    const r = snap.rect;
+    const tx = to.x - (r.left + r.width / 2);
+    const ty = to.y - (r.top + r.height / 2);
+    el.animate(
+      [
+        { transform: `translate(0,0) rotate(${snap.rot}deg) scale(1)`, opacity: 1 },
+        { transform: `translate(${(tx * 0.1).toFixed(0)}px, -22px) rotate(${snap.rot}deg) scale(1.04)`, opacity: 1, offset: 0.2 },
+        { transform: `translate(${tx.toFixed(0)}px, ${ty.toFixed(0)}px) rotate(${(40 + i * 12).toFixed(0)}deg) scale(.14)`, opacity: 0.2 },
+      ],
+      { duration: 300 * speed, delay: i * 38 * speed, easing: "cubic-bezier(.5,0,.6,.9)", fill: "both" },
+    );
+    drop(el, (300 + i * 38) * speed + 40);
+    later(i * 38, () => sfx("discard"));
+  });
+  later(300 + snaps.length * 38 - 80, () => pulse(".pile-discard", "bump"));
+}
+
+/** The discard pile is shuffled back into the draw pile: card backs arc across the tray. */
+export function shuffleFx() {
+  const a = rectOfSel(".pile-discard");
+  const b = rectOfSel(".pile-draw");
+  sfx("shuffle");
+  pulse(".pile-draw", "bump");
+  if (!a || !b || reduced()) return;
+  const from = midOf(a);
+  const to = midOf(b);
+  const lift = Math.min(90, Math.abs(to.x - from.x) * 0.16 + 30);
+  for (let i = 0; i < 7; i++) {
+    void addEffect({
+      life: 0.34,
+      delay: i * 0.035,
+      draw: (c, k) => {
+        const e = easeOut(k);
+        const x = lerp(from.x, to.x, e);
+        const y = lerp(from.y, to.y, e) - Math.sin(k * Math.PI) * lift;
+        c.translate(x, y);
+        c.rotate(k * Math.PI * 2 * (i % 2 ? 1 : -1));
+        c.globalAlpha = k < 0.15 ? k / 0.15 : k > 0.85 ? (1 - k) / 0.15 : 1;
+        c.fillStyle = "#16242e";
+        c.strokeStyle = "#5fe3d6";
+        c.lineWidth = 1.5;
+        c.beginPath();
+        c.roundRect(-9, -13, 18, 26, 3);
+        c.fill();
+        c.stroke();
+      },
+    });
+  }
 }
 
 /** Slides hand slots from their previous rects into their new places, and deals new ones from the draw pile. */
-export function flipHand(before: Map<string, DOMRect>, fresh: boolean) {
+export function flipHand(before: Map<string, DOMRect>, fresh: boolean, delay = 0) {
   const slots = [...root.querySelectorAll<HTMLElement>(".hand .slot")];
   const pile = root.querySelector<HTMLElement>(".pile-draw")?.getBoundingClientRect();
+  const speed = timeScale();
   let dealt = 0;
   for (const slot of slots) {
     const uid = slot.dataset.uid ?? "";
@@ -881,28 +1046,28 @@ export function flipHand(before: Map<string, DOMRect>, fresh: boolean) {
     if (prev && !fresh) {
       const dx = prev.left - now.left;
       const dy = prev.top - now.top;
-      if (Math.abs(dx) + Math.abs(dy) > 1) {
-        card.animate([{ translate: `${dx}px ${dy}px` }, { translate: "0 0" }], { duration: 260, easing: "cubic-bezier(.2,.8,.3,1)" });
+      if (Math.abs(dx) + Math.abs(dy) > 1 && !reduced()) {
+        card.animate([{ translate: `${dx}px ${dy}px` }, { translate: "0 0" }], { duration: 300, easing: "cubic-bezier(.3,1.35,.5,1)" });
       }
     } else if (pile) {
-      window.setTimeout(() => sfx("draw"), dealt * 70);
-      if (reduced()) {
-        dealt += 1;
-        continue;
-      }
+      const at = delay + dealt * 62;
+      later(at, () => sfx("draw"));
+      dealt += 1;
+      if (reduced()) continue;
       const dx = pile.left + pile.width / 2 - (now.left + now.width / 2);
       const dy = pile.top + pile.height / 2 - (now.top + now.height / 2);
       card.animate(
         [
-          { translate: `${dx}px ${dy}px`, scale: "0.3", opacity: 0, rotate: "-40deg" },
-          { opacity: 1, offset: 0.3 },
-          { translate: "0 0", scale: "1", opacity: 1, rotate: "0deg" },
+          { translate: `${dx}px ${dy}px`, scale: "0.2", opacity: 0, rotate: "-30deg", filter: "brightness(2.4)" },
+          { translate: `${(dx * 0.45).toFixed(0)}px ${(dy * 0.45 - 46).toFixed(0)}px`, scale: "0.8", opacity: 1, rotate: "-9deg", filter: "brightness(1.5)", offset: 0.45 },
+          { translate: "0 -12px", scale: "1.06", opacity: 1, rotate: "1.5deg", filter: "brightness(1.15)", offset: 0.78 },
+          { translate: "0 0", scale: "1", opacity: 1, rotate: "0deg", filter: "brightness(1)" },
         ],
-        { duration: 380, delay: dealt * 70, easing: "cubic-bezier(.2,.8,.3,1)", fill: "backwards" },
+        { duration: 420 * speed, delay: at * speed, easing: "cubic-bezier(.3,.7,.3,1)", fill: "backwards" },
       );
-      dealt += 1;
     }
   }
+  if (dealt) later(delay, () => pulse(".pile-draw", "bump"));
 }
 
 export function handRects(): Map<string, DOMRect> {
@@ -914,31 +1079,126 @@ export function handRects(): Map<string, DOMRect> {
   return out;
 }
 
+/** Every card in hand as it looks now, for the fly-to-discard animation after the hand is redrawn. */
+export function handSnaps(): CardSnap[] {
+  const out: CardSnap[] = [];
+  for (const slot of root.querySelectorAll<HTMLElement>(".hand .slot")) {
+    const snap = snapCard(slot);
+    if (snap) out.push(snap);
+  }
+  return out;
+}
+
+/* ----------------------------------------------------------- interface */
+
+/** A pop of sparks and a ring over an element: a purchase, a pick, a reward taken. */
+export function sparkle(rect: DOMRect | null, color: string = C.gold) {
+  if (!rect || reduced()) return;
+  const p = midOf(rect);
+  flash(p.x, p.y, Math.min(rect.width, rect.height) * 0.45, color, 0.16);
+  void ring(p.x, p.y, Math.min(rect.width, rect.height) * 0.3, Math.max(rect.width, rect.height) * 0.7, color, 0.42, 3);
+  for (let i = 0; i < 16; i++) {
+    emit({ kind: "dot", x: rect.left + Math.random() * rect.width, y: rect.top + Math.random() * rect.height, vx: rnd(-60, 60), vy: rnd(-140, -30), g: 160, life: rnd(0.4, 0.8), size: rnd(1.6, 3.2), color: i % 3 ? color : "#ffffff", flicker: 0.6, delay: Math.random() * 0.1 });
+  }
+}
+
+/**
+ * Flies small tokens from one place to another along arcs: coins to the purse, a card to the deck,
+ * a relic to the top bar. Resolves as the first one lands.
+ */
+export function flyTokens(from: DOMRect | null, to: DOMRect | null, kind: "coin" | "card" | "relic", count = 1, color: string = C.gold): Promise<void> {
+  if (!from || !to || reduced()) return Promise.resolve();
+  const a = midOf(from);
+  const b = midOf(to);
+  const life = 0.46;
+  for (let i = 0; i < count; i++) {
+    const start = { x: a.x + rnd(-0.3, 0.3) * from.width, y: a.y + rnd(-0.3, 0.3) * from.height };
+    const bend = rnd(-70, 70);
+    const liftY = rnd(40, 110);
+    void addEffect({
+      life,
+      delay: i * 0.035,
+      draw: (c, k, age) => {
+        const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+        const x = lerp(start.x, b.x, e) + Math.sin(k * Math.PI) * bend;
+        const y = lerp(start.y, b.y, e) - Math.sin(k * Math.PI) * liftY;
+        c.translate(x, y);
+        c.globalAlpha = k > 0.9 ? (1 - k) / 0.1 : 1;
+        if (kind === "coin") {
+          c.scale(Math.abs(Math.cos(age * 14 + i)) * 0.8 + 0.2, 1);
+          c.fillStyle = "#ffd36a";
+          c.strokeStyle = "#8a5a12";
+          c.lineWidth = 1.5;
+          c.beginPath();
+          c.arc(0, 0, 6, 0, Math.PI * 2);
+          c.fill();
+          c.stroke();
+        } else if (kind === "card") {
+          c.rotate(k * 5);
+          c.scale(lerp(1.6, 0.6, k), lerp(1.6, 0.6, k));
+          c.fillStyle = "#16242e";
+          c.strokeStyle = color;
+          c.lineWidth = 2;
+          c.beginPath();
+          c.roundRect(-10, -14, 20, 28, 3);
+          c.fill();
+          c.stroke();
+        } else {
+          c.rotate(age * 6);
+          c.fillStyle = color;
+          c.beginPath();
+          for (let q = 0; q < 8; q++) {
+            const r = q % 2 ? 4 : 11;
+            const ang = (Math.PI / 4) * q;
+            if (q) c.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
+            else c.moveTo(Math.cos(ang) * r, Math.sin(ang) * r);
+          }
+          c.closePath();
+          c.fill();
+        }
+        if (Math.random() < 0.5) emit({ kind: "dot", x, y, size: 2, color, life: 0.25, flicker: 0.5 });
+      },
+      done: () => {
+        if (i === 0) {
+          flash(b.x, b.y, 18, color, 0.14);
+          void ring(b.x, b.y, 4, 26, color, 0.3, 2);
+        }
+      },
+    });
+  }
+  return wait(life * 1000);
+}
+
 /* ------------------------------------------------------------ aim arrow */
 
 let arrow: SVGPathElement | null = null;
+let arrowGlow: SVGPathElement | null = null;
 let arrowHead: SVGPathElement | null = null;
 
 export function aim(from: { x: number; y: number } | null, to: { x: number; y: number } | null, hot: boolean) {
   if (!from || !to) {
     arrow?.remove();
+    arrowGlow?.remove();
     arrowHead?.remove();
     arrow = null;
+    arrowGlow = null;
     arrowHead = null;
     return;
   }
   if (!arrow) {
+    arrowGlow = svgPath("", "aim-glow");
     arrow = svgPath("", "aim");
     arrowHead = svgPath("", "aim-head");
   }
   const cx = from.x + (to.x - from.x) * 0.2;
   const cy = Math.min(from.y, to.y) - 120;
-  arrow.setAttribute("d", `M${from.x} ${from.y} Q${cx} ${cy} ${to.x} ${to.y}`);
+  const d = `M${from.x} ${from.y} Q${cx} ${cy} ${to.x} ${to.y}`;
+  arrow.setAttribute("d", d);
+  arrowGlow!.setAttribute("d", d);
   const angle = Math.atan2(to.y - cy, to.x - cx);
   const s = 20;
   const p1 = `${to.x - Math.cos(angle - 0.45) * s} ${to.y - Math.sin(angle - 0.45) * s}`;
   const p2 = `${to.x - Math.cos(angle + 0.45) * s} ${to.y - Math.sin(angle + 0.45) * s}`;
-  arrowHead!.setAttribute("d", `M${p1} L${to.x} ${to.y} L${p2}`);
-  arrow.classList.toggle("hot", hot);
-  arrowHead!.classList.toggle("hot", hot);
+  arrowHead!.setAttribute("d", `M${p1} L${to.x} ${to.y} L${p2} Z`);
+  for (const el of [arrow, arrowGlow!, arrowHead!]) el.classList.toggle("hot", hot);
 }

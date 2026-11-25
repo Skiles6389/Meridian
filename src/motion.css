@@ -1,0 +1,788 @@
+/*
+ * Motion and finish. Loaded after styles.css: the shared easing curves, every one-shot UI
+ * animation the effects code triggers by class, the staggered screen entrances, and the chrome
+ * polish. Particles and drawn effects live on the canvas (ui/gfx.ts), not here.
+ *
+ * Entrance keyframes animate the individual `translate` / `scale` / `rotate` properties so they
+ * compose with whatever `transform` an element already carries.
+ */
+
+:root {
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-soft-spring: cubic-bezier(0.3, 1.3, 0.5, 1);
+  --ease-in: cubic-bezier(0.55, 0, 0.9, 0.4);
+  --ease-inout: cubic-bezier(0.65, 0, 0.3, 1);
+}
+
+/* ------------------------------------------------------------ fx layer */
+
+.fx-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Afterimages a jet leaves behind on a hard maneuver. */
+.cj-ghost {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  filter: brightness(1.5) saturate(0.4) drop-shadow(0 0 8px var(--tint, #5fe3d6));
+}
+
+.cj-ghost .cj-glow {
+  display: none;
+}
+
+.card-ghost {
+  position: absolute;
+  transform-origin: 50% 60%;
+  will-change: transform, opacity;
+  filter: drop-shadow(0 0 14px var(--tint, transparent));
+}
+
+/* A ghost is the card inside a stand-in slot, so a phone hand's cropped styling still applies. */
+.card-ghost.hand {
+  bottom: auto;
+  z-index: auto;
+}
+
+.card-ghost .slot {
+  position: static;
+  width: 100%;
+  margin: 0;
+  transform: none;
+  transition: none;
+}
+
+.card-ghost .card {
+  --cw: inherit;
+  width: var(--cw);
+  transform: none !important;
+  translate: none !important;
+  filter: none !important;
+  transition: none;
+}
+
+.card-ghost:not(.mini) .card {
+  height: var(--ch);
+}
+
+.card-ghost.burning {
+  filter: drop-shadow(0 0 12px rgba(255, 130, 40, 0.8));
+}
+
+/* ------------------------------------------------------ floating numbers */
+
+.float {
+  animation: float-up 0.95s var(--ease-out) forwards;
+  will-change: transform, opacity;
+}
+
+.float span {
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.55);
+}
+
+@keyframes float-up {
+  0% {
+    transform: translate(-50%, -30%) scale(0.5);
+    opacity: 0;
+  }
+  16% {
+    transform: translate(-50%, -62%) scale(1.14);
+    opacity: 1;
+  }
+  30% {
+    transform: translate(-50%, -58%) scale(1);
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -150%) scale(0.94);
+    opacity: 0;
+  }
+}
+
+.dmg {
+  animation: dmg-pop 0.9s linear forwards;
+}
+
+/* A hit number slams in oversized, squashes, settles, then is knocked up and away. */
+@keyframes dmg-pop {
+  0% {
+    transform: translate(-50%, -50%) scale(2.6) rotate(0deg);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.3, 0, 0.6, 1);
+  }
+  9% {
+    transform: translate(-50%, -50%) scale(0.84, 0.78) rotate(var(--rot));
+    opacity: 1;
+    animation-timing-function: var(--ease-spring);
+  }
+  24% {
+    transform: translate(-50%, -58%) scale(1.06) rotate(var(--rot));
+    animation-timing-function: ease-out;
+  }
+  58% {
+    transform: translate(calc(-50% + var(--dx) * 0.45), -92%) scale(1) rotate(var(--rot));
+    opacity: 1;
+    animation-timing-function: ease-in;
+  }
+  100% {
+    transform: translate(calc(-50% + var(--dx)), -150%) scale(0.86) rotate(var(--rot));
+    opacity: 0;
+  }
+}
+
+.dmg-big span {
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.6), 0 0 22px rgba(255, 150, 50, 0.6);
+}
+
+.dmg-crit {
+  animation-duration: 1.05s;
+}
+
+.dmg-crit span {
+  background: linear-gradient(180deg, #fffbe0 20%, #ffd24a 55%, #ff7a2a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0;
+  filter: drop-shadow(0 0 2px #4a0e02) drop-shadow(0 3px 0 #4a0e02) drop-shadow(0 0 14px rgba(255, 120, 40, 0.9));
+}
+
+.gain-shield span {
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.55), 0 0 16px rgba(90, 164, 255, 0.7);
+}
+
+.gain-heal span {
+  text-shadow: 0 3px 0 rgba(0, 0, 0, 0.55), 0 0 16px rgba(70, 201, 138, 0.7);
+}
+
+.st-float {
+  animation-duration: 0.85s;
+}
+
+.move-name {
+  animation: move-name 0.9s var(--ease-out) forwards;
+}
+
+@keyframes move-name {
+  0% {
+    transform: translate(-50%, -50%) scaleX(1.5);
+    letter-spacing: 0.4em;
+    opacity: 0;
+  }
+  18% {
+    transform: translate(-50%, -50%) scaleX(1);
+    letter-spacing: 0.05em;
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -90%);
+    opacity: 0;
+  }
+}
+
+.vignette {
+  animation: vignette 0.5s ease-out forwards;
+}
+
+/* --------------------------------------------------------------- banners */
+
+.banner-inner {
+  position: relative;
+  overflow: hidden;
+  animation: banner-band 1.4s linear forwards;
+  transform-origin: 50% 50%;
+}
+
+.banner-inner b {
+  animation: banner-text 1.4s linear forwards;
+}
+
+.banner-inner small {
+  animation: banner-sub 1.4s linear forwards;
+}
+
+.banner-streak {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34%;
+  background: linear-gradient(100deg, transparent, rgba(255, 244, 214, 0.34) 45%, rgba(255, 255, 255, 0.6) 50%, rgba(255, 244, 214, 0.3) 55%, transparent);
+  transform: translateX(-120%) skewX(-18deg);
+  animation: banner-streak 1.4s var(--ease-inout) forwards;
+  pointer-events: none;
+}
+
+/* The band cuts in from the left, holds, and is whipped out to the right. */
+@keyframes banner-band {
+  0% {
+    clip-path: inset(46% 100% 46% 0);
+    opacity: 0;
+    animation-timing-function: var(--ease-out);
+  }
+  14% {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+  80% {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    animation-timing-function: var(--ease-in);
+  }
+  100% {
+    clip-path: inset(44% 0 44% 100%);
+    opacity: 0;
+  }
+}
+
+/* The words slam in wide and settle, then leave ahead of the band. */
+@keyframes banner-text {
+  0% {
+    transform: translateX(-9vw) scale(1.5);
+    letter-spacing: 0.32em;
+    opacity: 0;
+    animation-timing-function: var(--ease-out);
+  }
+  17% {
+    transform: translateX(0) scale(1);
+    letter-spacing: 0.08em;
+    opacity: 1;
+    animation-timing-function: linear;
+  }
+  76% {
+    transform: translateX(1.2vw) scale(1.015);
+    letter-spacing: 0.1em;
+    opacity: 1;
+    animation-timing-function: var(--ease-in);
+  }
+  100% {
+    transform: translateX(28vw) scale(1);
+    letter-spacing: 0.3em;
+    opacity: 0;
+  }
+}
+
+@keyframes banner-sub {
+  0%,
+  8% {
+    transform: translateY(0.8em);
+    opacity: 0;
+    animation-timing-function: var(--ease-out);
+  }
+  24%,
+  74% {
+    transform: translateY(0);
+    opacity: 1;
+    animation-timing-function: var(--ease-in);
+  }
+  100% {
+    transform: translateX(-14vw);
+    opacity: 0;
+  }
+}
+
+@keyframes banner-streak {
+  0%,
+  6% {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  46%,
+  100% {
+    transform: translateX(420%) skewX(-18deg);
+  }
+}
+
+.banner.short .banner-inner,
+.banner.short .banner-inner b,
+.banner.short .banner-inner small,
+.banner.short .banner-streak {
+  animation-duration: 0.82s;
+}
+
+.banner.boss .banner-inner b,
+.banner.elite .banner-inner b {
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.6), 0 0 34px rgba(255, 110, 70, 0.6);
+}
+
+.banner.win .banner-inner {
+  box-shadow: 0 -3px 0 #f0cd7d, 0 3px 0 #f0cd7d, 0 0 60px rgba(240, 205, 125, 0.35);
+}
+
+.wipe i {
+  animation: wipe 0.95s cubic-bezier(0.5, 0, 0.3, 1) forwards;
+}
+
+/* ------------------------------------------------------- bars and chips */
+
+.bar-fill {
+  transition: width 0.22s var(--ease-out);
+}
+
+.bar-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 55% 0;
+  border-radius: 9px 9px 0 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0));
+}
+
+.bar-ghost {
+  transition: width 0.5s var(--ease-inout) 0.28s;
+}
+
+.bar.hurt {
+  animation: bar-hurt 0.34s linear;
+}
+
+.bar.hurt .bar-track {
+  animation: bar-flash 0.34s ease-out;
+}
+
+@keyframes bar-hurt {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  15% {
+    translate: -5px 1px;
+  }
+  35% {
+    translate: 4px -1px;
+  }
+  55% {
+    translate: -3px 0;
+  }
+  78% {
+    translate: 2px 0;
+  }
+}
+
+@keyframes bar-flash {
+  0% {
+    filter: brightness(3) saturate(0.2);
+  }
+  100% {
+    filter: none;
+  }
+}
+
+.bar.mend .bar-track {
+  animation: bar-mend 0.6s ease-out;
+}
+
+@keyframes bar-mend {
+  0% {
+    box-shadow: 0 0 0 2px #090c10, 0 0 0 4px #7dffb0, 0 0 22px 4px rgba(90, 255, 160, 0.9), inset 0 2px 4px rgba(0, 0, 0, 0.8);
+    filter: brightness(1.7);
+  }
+}
+
+.bar.guard .bar-track {
+  animation: bar-guard 0.5s ease-out;
+}
+
+@keyframes bar-guard {
+  0% {
+    box-shadow: 0 0 0 2px #090c10, 0 0 0 5px #cfe6ff, 0 0 24px 5px rgba(110, 180, 255, 0.95), inset 0 2px 4px rgba(0, 0, 0, 0.8);
+    filter: brightness(1.5);
+  }
+}
+
+.bar-shield.pop {
+  animation: chip-pop 0.42s var(--ease-spring);
+}
+
+.st {
+  transform-origin: 50% 60%;
+}
+
+.st.pop {
+  animation: chip-pop 0.42s var(--ease-spring);
+}
+
+@keyframes chip-pop {
+  0% {
+    scale: 1.9;
+    filter: brightness(2.4);
+  }
+  100% {
+    scale: 1;
+    filter: none;
+  }
+}
+
+/* ---------------------------------------------------------- foe intents */
+
+.foe.acting .intent {
+  animation: intent-act 0.5s var(--ease-out);
+}
+
+@keyframes intent-act {
+  0% {
+    scale: 1;
+  }
+  30% {
+    scale: 1.34;
+    filter: brightness(1.8) drop-shadow(0 0 10px currentColor);
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+.foe.acting .unit-art {
+  filter: brightness(1.2) drop-shadow(0 0 12px rgba(255, 120, 80, 0.55));
+}
+
+.shell.enter[data-screen="combat"] .foe > .intent,
+.shell.enter[data-screen="combat"] .foe > .unit-hud {
+  animation: rise-in 0.4s var(--ease-spring) backwards;
+  animation-delay: calc(0.75s + var(--slot) * 0.1s);
+}
+
+.shell.enter[data-screen="combat"] .pilot {
+  animation: slide-right 0.45s var(--ease-out) 0.35s backwards;
+}
+
+.shell.enter[data-screen="combat"] .tray-left,
+.shell.enter[data-screen="combat"] .tray-right {
+  animation: rise-in 0.45s var(--ease-out) 0.3s backwards;
+}
+
+.shell.enter[data-screen="combat"] .ally {
+  animation: fly-in-low 0.8s var(--ease-out);
+}
+
+.shell.enter[data-screen="combat"] .foe {
+  animation: fly-in-far 0.9s var(--ease-out) backwards;
+  animation-delay: calc(0.12s + var(--slot) * 0.1s);
+}
+
+/* The target reticle snaps on with a spin. */
+.foe.selected .reticle,
+.foe.aimed .reticle {
+  transition: opacity 0.12s, scale 0.22s var(--ease-spring);
+}
+
+/* ----------------------------------------------------- camera and stage */
+
+.battle {
+  --cam-ease: cubic-bezier(0.7, 0, 0.2, 1);
+  --cam-time: 0.78s;
+}
+
+.threat-tag {
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.threat-tag.six {
+  animation: six-warn 0.7s ease-in-out infinite, tag-slam 0.36s var(--ease-spring);
+}
+
+@keyframes tag-slam {
+  0% {
+    scale: 1.7;
+    filter: brightness(2.2);
+  }
+}
+
+/* ------------------------------------------------- energy, piles, turn */
+
+.energy-orb {
+  transition: filter 0.2s;
+}
+
+.energy-orb::after {
+  content: "";
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  border: 2px solid var(--energy-hi);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.energy-orb.gain {
+  animation: orb-gain 0.5s var(--ease-spring);
+}
+
+.energy-orb.gain::after {
+  animation: orb-ring 0.5s var(--ease-out);
+}
+
+@keyframes orb-gain {
+  0% {
+    scale: 0.86;
+    filter: brightness(2.2);
+  }
+  100% {
+    scale: 1;
+    filter: none;
+  }
+}
+
+@keyframes orb-ring {
+  0% {
+    scale: 0.7;
+    opacity: 1;
+  }
+  100% {
+    scale: 1.7;
+    opacity: 0;
+  }
+}
+
+.energy-orb.spend {
+  animation: orb-spend 0.34s var(--ease-out);
+}
+
+.energy-orb.spend .orb-num {
+  animation: num-tick 0.34s var(--ease-spring);
+}
+
+@keyframes orb-spend {
+  0% {
+    scale: 1.1 0.92;
+    filter: brightness(0.8);
+  }
+  100% {
+    scale: 1;
+    filter: none;
+  }
+}
+
+@keyframes num-tick {
+  0% {
+    translate: 0 -40%;
+    opacity: 0.2;
+  }
+}
+
+.pile {
+  transition: transform 0.16s var(--ease-spring), filter 0.16s;
+}
+
+.pile:hover {
+  transform: translateY(-3px) scale(1.06);
+  filter: brightness(1.2);
+}
+
+.pile:active {
+  transform: scale(0.94);
+}
+
+.pile.bump {
+  animation: pile-bump 0.34s var(--ease-spring);
+}
+
+.pile.bump i {
+  animation: chip-pop 0.34s var(--ease-spring);
+}
+
+@keyframes pile-bump {
+  0% {
+    scale: 1.28;
+    filter: brightness(1.7);
+  }
+  100% {
+    scale: 1;
+    filter: none;
+  }
+}
+
+.end-turn {
+  transition: transform 0.16s var(--ease-spring), filter 0.16s;
+  overflow: hidden;
+}
+
+.end-turn::after,
+.btn::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 46%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.38) 50%, transparent);
+  transform: translateX(-130%) skewX(-20deg);
+  pointer-events: none;
+}
+
+.end-turn {
+  position: relative;
+}
+
+.end-turn:hover:not(:disabled)::after,
+.btn:hover:not(:disabled)::after {
+  animation: sheen 0.55s var(--ease-out);
+}
+
+.end-turn.ready::after {
+  animation: sheen 2.8s var(--ease-inout) infinite;
+}
+
+@keyframes sheen {
+  0% {
+    transform: translateX(-130%) skewX(-20deg);
+  }
+  60%,
+  100% {
+    transform: translateX(330%) skewX(-20deg);
+  }
+}
+
+.end-turn:hover:not(:disabled) {
+  transform: translateY(-3px) scale(1.03);
+}
+
+.end-turn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97);
+  transition-duration: 0.05s;
+}
+
+/* ----------------------------------------------------------------- hand */
+
+.slot {
+  transition: transform 0.26s var(--ease-soft-spring), opacity 0.16s;
+}
+
+.slot .card {
+  transition: transform 0.24s var(--ease-soft-spring), filter 0.2s;
+  will-change: transform;
+}
+
+.hand.stowed .slot {
+  transition: none;
+}
+
+.slot.hover .card,
+.slot.armed .card {
+  filter: drop-shadow(0 1em 1.2em rgba(0, 0, 0, 0.55));
+}
+
+/* A lifted card catches the light once. */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 0.8em;
+  background: linear-gradient(112deg, transparent 38%, rgba(255, 255, 255, 0.42) 50%, transparent 62%) no-repeat;
+  background-size: 260% 100%;
+  background-position: 130% 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.slot.hover .card::before,
+.card.pick:hover:not(:disabled)::before,
+.ware .card:hover:not(:disabled)::before,
+.card-preview .card::before {
+  animation: card-shine 0.6s var(--ease-out);
+}
+
+@keyframes card-shine {
+  0% {
+    opacity: 1;
+    background-position: 130% 0;
+  }
+  100% {
+    opacity: 1;
+    background-position: -40% 0;
+  }
+}
+
+.slot.dragging .card {
+  transform: translateY(calc(var(--cw) * -0.1)) rotate(calc(var(--r) * -1)) scale(1.16);
+  filter: drop-shadow(0 1.6em 1.6em rgba(0, 0, 0, 0.6)) brightness(1.08);
+}
+
+.slot.release .card-frame {
+  outline: 3px solid var(--energy);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 0.14em #0b0f14, 0 0 2em 0.4em rgba(95, 227, 255, 0.65), 0 0.5em 1em rgba(0, 0, 0, 0.55);
+}
+
+.slot.armed .card-frame {
+  animation: armed-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes armed-pulse {
+  50% {
+    outline-offset: 6px;
+    outline-color: #fff0b8;
+  }
+}
+
+.card-preview {
+  animation: preview-in 0.22s var(--ease-spring);
+}
+
+.aim-hint {
+  animation: lowhp 1.2s ease-in-out infinite, rise-in 0.22s var(--ease-spring);
+}
+
+/* ------------------------------------------------------------ aim arrow */
+
+.aim-glow {
+  fill: none;
+  stroke: rgba(255, 211, 106, 0.3);
+  stroke-width: 16;
+  stroke-linecap: round;
+  filter: blur(5px);
+}
+
+.aim {
+  stroke-width: 5;
+  stroke-dasharray: 3 13;
+  animation: aim-march 0.38s linear infinite;
+}
+
+.aim-head {
+  fill: #ffd36a;
+  stroke-width: 4;
+  filter: drop-shadow(0 0 6px rgba(255, 211, 106, 0.9));
+}
+
+.aim-glow.hot {
+  stroke: rgba(255, 90, 58, 0.42);
+}
+
+.aim-head.hot {
+  fill: #ff5a3a;
+  filter: drop-shadow(0 0 8px rgba(255, 90, 58, 1));
+}
+
+@keyframes aim-march {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+/* -------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0s !important;
+  }
+  .card::before,
+  .btn::after,
+  .end-turn::after {
+    display: none;
+  }
+}

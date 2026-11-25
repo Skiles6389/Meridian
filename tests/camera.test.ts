@@ -5,18 +5,18 @@ import { chaseAspect, hasChaseArt } from "../src/ui/art";
 import {
   allySpot,
   attitude,
-  breakTurn,
   cubic,
   cubicTangent,
   flightView,
   foeSpots,
   mirrored,
-  overshoot,
+  offstage,
   sixSpots,
   sizeAlong,
+  swapIn,
+  swapOut,
   type CamShape,
   type CamShot,
-  type FlightView,
 } from "../src/ui/camera";
 
 const SHAPES: CamShape[] = ["desk", "portrait", "landscape"];
@@ -84,46 +84,59 @@ describe("chase camera framing", () => {
     }
   });
 
-  it("flies the break turn out to the side, round toward the camera, and up onto the six", () => {
-    const from = { x: 40, y: 28 };
-    const to = { x: 38, y: 75 };
-    const curve = breakTurn(from, to, -1);
-    expect(cubic(curve, 0)).toEqual(from);
-    expect(cubic(curve, 1)).toEqual(to);
-    const views: FlightView[] = [];
-    let view: FlightView | undefined;
-    let minX = 100;
-    let maxY = 0;
-    for (let i = 0; i <= 60; i++) {
-      const t = i / 60;
-      const p = cubic(curve, t);
-      minX = Math.min(minX, p.x);
-      maxY = Math.max(maxY, p.y);
-      const d = cubicTangent(curve, Math.min(0.995, Math.max(0.005, t)));
-      view = flightView(d.x * 16, d.y * 9, view);
-      if (views.at(-1) !== view) views.push(view);
+  it("leaves the frame on the way round to the six, then comes back in from off-screen tail-on", () => {
+    for (const side of [-1, 1]) {
+      for (const aspect of [16 / 9, 390 / 420, 844 / 222]) {
+        const from = { x: 50 - side * 10, y: 28 };
+        const six = { x: 50 - side * 12, y: 75 };
+        const off = 18;
+        const [exit, entry] = swapIn(from, six, side, off, aspect);
+        const edge = offstage(side, off);
+        expect(edge).toBe(side < 0 ? -off : 100 + off);
+        expect(cubic(exit, 0)).toEqual(from);
+        expect(cubic(entry, 1)).toEqual(six);
+        // The exit ends past the edge it banked toward and the entry starts beyond that same edge.
+        expect((cubic(exit, 1).x - 50) * side).toBeGreaterThan(50 + off - 0.01);
+        expect((cubic(entry, 0).x - 50) * side).toBeGreaterThan(50 + off - 0.01);
+        // It only ever moves outward on the way out and inward on the way back.
+        for (let i = 1; i <= 20; i++) {
+          expect((cubic(exit, i / 20).x - cubic(exit, (i - 1) / 20).x) * side, `exit ${side} ${i}`).toBeGreaterThan(0);
+          expect((cubic(entry, i / 20).x - cubic(entry, (i - 1) / 20).x) * side, `entry ${side} ${i}`).toBeLessThan(0);
+        }
+        // Dives toward the camera on the way out and stays inside the frame's height.
+        expect(cubic(exit, 1).y).toBeGreaterThan(from.y);
+        for (const curve of [exit, entry]) {
+          for (let i = 0; i <= 20; i++) {
+            const p = cubic(curve, i / 20);
+            expect(p.y).toBeGreaterThan(0);
+            expect(p.y).toBeLessThan(108);
+          }
+        }
+        // Arrives on the six tail-on, whatever the stage's shape.
+        const d = cubicTangent(entry, 0.995);
+        expect(flightView(d.x * aspect, d.y, "side"), `aspect ${aspect}`).toBe("rear");
+      }
     }
-    // Sweeps out wide to its side, stays on screen, and dips below the six before reversing onto it.
-    expect(minX).toBeLessThan(25);
-    expect(minX).toBeGreaterThan(0);
-    expect(maxY).toBeGreaterThan(to.y);
-    expect(maxY).toBeLessThan(100);
-    // Profile out of the turn, nose toward the camera as it comes round, then tail-on on the six.
-    expect(views[0]).toBe("side");
-    expect(views).toContain("front");
-    expect(views.at(-1)).toBe("rear");
-    expect(views.length).toBeLessThanOrEqual(4);
-    // A landscape phone's short, wide stage still arrives tail-on.
-    const flat = breakTurn({ x: 40, y: 25 }, { x: 36, y: 78 }, -1, 844 / 222);
-    const d = cubicTangent(flat, 0.995);
-    expect(flightView(d.x * 844, d.y * 222, "side")).toBe("rear");
   });
 
-  it("overshoots back out ahead tail-on, banking as it goes", () => {
-    const curve = overshoot({ x: 62, y: 80 }, { x: 67, y: 27 }, 1);
-    for (let i = 1; i < 20; i++) {
-      const d = cubicTangent(curve, i / 20);
-      expect(flightView(d.x * 16, d.y * 9, "rear")).toBe("rear");
+  it("overshoots out of the frame and returns from off-screen to its slot ahead", () => {
+    for (const side of [-1, 1]) {
+      for (const aspect of [16 / 9, 390 / 420, 844 / 222]) {
+        const six = { x: 50 - side * 12, y: 78 };
+        const slot = { x: 50 - side * 17, y: 27 };
+        const off = 14;
+        const [away, back] = swapOut(six, slot, side, off, aspect);
+        expect(cubic(away, 0)).toEqual(six);
+        expect(cubic(back, 1)).toEqual(slot);
+        expect((cubic(away, 1).x - 50) * side).toBeGreaterThan(50 + off - 0.01);
+        expect((cubic(back, 0).x - 50) * side).toBeGreaterThan(50 + off - 0.01);
+        // It pulls up and ahead straight off the six: tail-on as it starts to overshoot.
+        const lift = cubicTangent(away, 0.02);
+        expect(flightView(lift.x * aspect, lift.y, "rear")).toBe("rear");
+        expect(cubic(away, 1).y).toBeLessThan(six.y);
+        // It settles into its slot from the side it left by.
+        expect((cubic(back, 0.9).x - slot.x) * side).toBeGreaterThan(0);
+      }
     }
   });
 

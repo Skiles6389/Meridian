@@ -131,20 +131,38 @@ export function cubicTangent(c: Curve, t: number): Pt {
   };
 }
 
-/**
- * A break turn onto the player's six: the foe sweeps out to `side` (-1 left, 1 right), comes
- * round past the player toward the camera, then reverses up onto the six heading the same way as
- * the player. `aspect` is the stage's width over height.
- */
-export function breakTurn(from: Pt, to: Pt, side: number, aspect = 16 / 9): Curve {
-  // On a very wide, short stage the last leg needs less sideways run to arrive tail-on.
-  const tail = 22 * Math.min(1, 16 / 9 / aspect);
-  return [from, { x: from.x + side * 46, y: from.y + 6 }, { x: to.x + side * tail, y: to.y + 40 }, to];
+/** Stage x, in percent, of a point `off` percent beyond the edge on `side` (-1 left, 1 right). */
+export function offstage(side: number, off: number): number {
+  return side < 0 ? -off : 100 + off;
 }
 
-/** The overshoot: from the six the foe pulls up and out past the player and back into its slot ahead. */
-export function overshoot(from: Pt, to: Pt, side: number): Curve {
-  return [from, { x: from.x + side * 24, y: from.y - 16 }, { x: to.x + side * 18, y: to.y + 24 }, to];
+/**
+ * The swap onto the player's six, in two legs with a beat off-screen between them. First the foe
+ * breaks out to `side` and dives toward the camera until it is `off` percent past the edge of the
+ * stage; then it comes back in low from that side and reverses up onto the six, heading the same
+ * way as the player. `aspect` is the stage's width over height.
+ */
+export function swapIn(from: Pt, six: Pt, side: number, off: number, aspect = 16 / 9): [Curve, Curve] {
+  const edge = offstage(side, off);
+  // On a very wide, short stage the last leg needs less sideways run to arrive tail-on.
+  const tail = 12 * Math.min(1, 16 / 9 / aspect);
+  return [
+    [from, { x: from.x + side * 16, y: from.y - 5 }, { x: edge - side * 6, y: from.y + 8 }, { x: edge, y: from.y + 30 }],
+    [{ x: edge, y: six.y + 8 }, { x: six.x + side * 34, y: six.y + 20 }, { x: six.x + side * tail, y: six.y + 26 }, six],
+  ];
+}
+
+/**
+ * The swap back: from the six the foe pulls ahead past the player and peels off the `side` edge,
+ * then comes back in from that side and turns away from the camera into its slot ahead.
+ */
+export function swapOut(six: Pt, slot: Pt, side: number, off: number, aspect = 16 / 9): [Curve, Curve] {
+  const edge = offstage(side, off);
+  const tail = 5 * Math.min(1, 16 / 9 / aspect);
+  return [
+    [six, { x: six.x + side * 3, y: six.y - 30 }, { x: edge - side * 22, y: slot.y + 24 }, { x: edge, y: slot.y + 16 }],
+    [{ x: edge, y: slot.y + 9 }, { x: slot.x + side * 30, y: slot.y + 12 }, { x: slot.x + side * tail, y: slot.y + 16 }, slot],
+  ];
 }
 
 /**

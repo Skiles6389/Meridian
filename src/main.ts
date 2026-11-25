@@ -5,10 +5,11 @@ import "@fontsource/barlow-condensed/latin-700.css";
 import "@fontsource/barlow-condensed/latin-800.css";
 import "@fontsource/saira-stencil-one/latin-400.css";
 import "./styles.css";
+import "./motion.css";
 import { audioDebug, configureAudio, setAmbience, setMusic, sfx, unlockAudio, type Track } from "./audio";
 import { getCard } from "./game/cards";
 import { attackersOf, enemiesTakeLead, splitTurnEvents } from "./game/chase";
-import { PLAYER, setCombatFxSink, type ActionResult, type CombatFx } from "./game/combat";
+import { setCombatFxSink, type ActionResult, type CombatFx } from "./game/combat";
 import { HELP } from "./game/help";
 import { loadMeta, loadRun, saveMeta, saveRun } from "./game/meta";
 import {
@@ -30,6 +31,7 @@ import {
   leaveShop,
   openRemoval,
   playCard,
+  reachable,
   removeCard,
   takeRewardCard,
   takeRewardHeal,
@@ -37,25 +39,36 @@ import {
 } from "./game/run";
 import type { JetId, RunState } from "./game/types";
 import type { CamShot } from "./ui/camera";
-import { shotStyle } from "./ui/art";
 import {
   aim,
   banner,
   breakTurns,
   camera,
+  castCard,
+  discardHand,
   disengage,
   flipHand,
+  flyTokens,
   handRects,
+  handSnaps,
   initFx,
   playEvents,
+  pulse,
   setBar,
+  setSlowMo,
   setSpeed,
+  shuffleFx,
   snapBars,
+  snapCard,
+  sparkle,
   throwCard,
   wait,
   wipe,
-  type ShotStyle,
+  type CardSnap,
 } from "./ui/fx";
+import { rectOfSel, reduced } from "./ui/geo";
+import { effectCount, particleCount } from "./ui/gfx";
+import { C } from "./ui/cardfx";
 import { highestUnlocked, ROOKIE } from "./game/difficulty";
 import type { AppState } from "./ui/model";
 import { camShape, isCompact, phoneShape, renderApp, sceneKey, screenName } from "./ui/render";
@@ -102,12 +115,19 @@ function musicFor(app: AppState): Track {
 }
 
 let lastGold: number | null = null;
+/** Gold gained since the last draw, to fly to the purse once the new screen is up. */
+let goldGain = 0;
+/** Where the player last clicked, as the source for a reward's tokens. */
+let lastClick: DOMRect | null = null;
 
 function syncAudio() {
   setMusic(musicFor(app));
   setAmbience(app.view === "run" && (!!app.frozen || app.run?.screen === "combat"));
   const gold = app.view === "run" ? app.run?.gold ?? null : null;
-  if (gold !== null && lastGold !== null && gold !== lastGold) sfx("gold");
+  if (gold !== null && lastGold !== null && gold !== lastGold) {
+    sfx("gold");
+    if (gold > lastGold) goldGain = gold - lastGold;
+  }
   lastGold = gold;
 }
 
@@ -149,6 +169,12 @@ function draw() {
     }
   }
   if (app.armed !== null) updateAim();
+  if (goldGain > 0) {
+    const coins = Math.min(9, Math.max(3, Math.ceil(goldGain / 8)));
+    goldGain = 0;
+    pulse(".hud-gold", "gain");
+    void flyTokens(rectOfSel(".loot.done .ico") ?? lastClick, rectOfSel(".hud-gold .ico"), "coin", coins);
+  }
 }
 
 function toast(message: string, kind: "info" | "bad" = "info") {
@@ -222,11 +248,9 @@ function targetAlive(uid: number | null): boolean {
   return uid !== null && !!app.run?.combat?.enemies.some((enemy) => enemy.uid === uid && enemy.hp > 0);
 }
 
-function cardSnapshot(index: number) {
+function cardSnapshot(index: number): CardSnap | undefined {
   const slot = root!.querySelector<HTMLElement>(`.slot[data-slot="${index}"]`);
-  const card = slot?.querySelector<HTMLElement>(".card");
-  if (!slot || !card) return undefined;
-  return { html: card.outerHTML, rect: card.getBoundingClientRect(), rot: Number.parseFloat(slot.style.getPropertyValue("--r")) || 0 };
+  return slot ? snapCard(slot) : undefined;
 }
 
 function barsOf(run: RunState): Map<number, { hp: number; shield: number }> {
@@ -237,14 +261,25 @@ function barsOf(run: RunState): Map<number, { hp: number; shield: number }> {
   return bars;
 }
 
+interface PlayedCard {
+  id: string;
+  type: string;
+  snap?: CardSnap;
+  /** The enemy a targeted card is aimed at. */
+  target: number | null;
+  exhaust: boolean;
+  /** Hits every enemy, so its shots fly together. */
+  salvo: boolean;
+}
+
 interface ActionOpts {
-  shot: ShotStyle;
-  thrown?: ReturnType<typeof cardSnapshot>;
-  attack?: boolean;
+  card?: PlayedCard;
   turn?: boolean;
-  /** Unit the thrown card flies into, or null for the middle of the stage. */
-  aimAt?: number | null;
-  cardType?: string;
+}
+
+function pileSizes(run: RunState) {
+  const c = run.combat;
+  return { draw: c?.draw.length ?? 0, discard: (c?.discard.length ?? 0) + (c?.played.length ?? 0), exhaust: c?.exhaustPile.length ?? 0, energy: c?.energy ?? 0 };
 }
 
 async function combatAction(perform: () => ActionResult | void, opts: ActionOpts) {
@@ -254,6 +289,8 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
   const beforeScreen = run.screen;
   const beforeNotices = run.notices.length;
   const rects = handRects();
+  const leftInHand = opts.turn ? handSnaps() : [];
+  const before = pileSizes(run);
   const events: CombatFx[] = [];
   setCombatFxSink((event) => events.push(event));
   let result: ActionResult | void;
@@ -279,11 +316,24 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
   draw();
   document.body.classList.add("busy");
   try {
-    if (opts.thrown) throwCard(opts.thrown, !!opts.attack, opts.aimAt ?? null, opts.cardType ?? "attack");
+    const card = opts.card;
+    if (card?.snap) throwCard(card.snap, card.type, card.exhaust);
     else if (!opts.turn) sfx("play");
     const hand = root!.querySelector<HTMLElement>(".hand");
-    if (!ended && !opts.turn) flipHand(rects, false);
-    if (opts.turn) hand?.classList.add("stowed");
+    const now = pileSizes(run);
+    // The discard pile shrinking means it was shuffled back into the draw pile.
+    const reshuffled = !ended && now.discard < before.discard;
+    if (!ended && !opts.turn) {
+      if (reshuffled) shuffleFx();
+      flipHand(rects, false, reshuffled ? 260 : 0);
+      if (now.energy !== before.energy) pulse(".energy-orb", now.energy < before.energy ? "spend" : "gain");
+      if (now.exhaust > before.exhaust) window.setTimeout(() => pulse(".pile-exhaust", "bump"), 420);
+      else if (now.discard > before.discard) window.setTimeout(() => pulse(".pile-discard", "bump"), 380);
+    }
+    if (opts.turn) {
+      hand?.classList.add("stowed");
+      discardHand(leftInHand);
+    }
     snapBars(barsOf(pre));
     const pendingDown = new Set<number>();
     for (const enemy of pre.combat!.enemies) {
@@ -294,8 +344,13 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
         pendingDown.add(enemy.uid);
       }
     }
-    if (opts.thrown) await wait(opts.attack ? 260 : 170);
-    const ctx = { playerShot: opts.shot, bars: barsOf(pre), pendingDown };
+    if (card) {
+      // The cast starts as the card flares and pours into the jet.
+      await wait(120);
+      await castCard(card.id, card.target);
+    }
+    const ctx = { card: card?.id, salvo: card?.salvo, bars: barsOf(pre), pendingDown };
+    const turnCtx = { bars: ctx.bars, pendingDown };
     if (opts.turn) {
       const timeline = splitTurnEvents(events);
       if (enemiesTakeLead(timeline.enemy)) {
@@ -303,12 +358,12 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
         breakTurns(attackersOf(timeline.enemy), camShape());
         await pullBack;
       }
-      await playEvents(timeline.enemy, ctx);
+      await playEvents(timeline.enemy, turnCtx);
       if (timeline.player.length) {
         await wait(60);
         await Promise.all([moveCamera("close"), disengage()]);
       }
-      await playEvents(timeline.player, ctx);
+      await playEvents(timeline.player, turnCtx);
     } else {
       await playEvents(events, ctx);
     }
@@ -326,7 +381,9 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
       if (opts.turn) {
         hand?.classList.remove("stowed");
         void banner(`Turn ${run.combat!.turn}`, "", "short");
-        flipHand(new Map(), true);
+        if (reshuffled) shuffleFx();
+        flipHand(new Map(), true, reshuffled ? 260 : 0);
+        pulse(".energy-orb", "gain");
       }
     }
   } finally {
@@ -342,15 +399,10 @@ function play(index: number, uid: number | null) {
   if (!run || !inst) return;
   const def = getCard(inst.id);
   if (def.target === "enemy" && uid !== null) app.targetUid = uid;
-  const thrown = cardSnapshot(index);
   const single = run.combat?.enemies.find((enemy) => enemy.hp > 0)?.uid ?? null;
-  const aimAt = def.target === "enemy" ? uid ?? (targetAlive(app.targetUid) ? app.targetUid : single) : def.target === "all" ? null : PLAYER;
+  const target = def.target === "enemy" ? uid ?? (targetAlive(app.targetUid) ? app.targetUid : single) : null;
   void combatAction(() => playCard(run, app.meta, index, uid), {
-    shot: def.type === "attack" ? shotStyle(def.id) : "zap",
-    thrown,
-    attack: def.type === "attack",
-    aimAt,
-    cardType: def.type,
+    card: { id: def.id, type: def.type, snap: cardSnapshot(index), target, exhaust: !!def.exhaust, salvo: def.target === "all" },
   });
 }
 
@@ -359,7 +411,7 @@ function finishTurn() {
   if (!run?.combat) return;
   app.armed = null;
   sfx("turn");
-  void combatAction(() => endTurn(run, app.meta), { shot: "missile", turn: true });
+  void combatAction(() => endTurn(run, app.meta), { turn: true });
 }
 
 function clickCard(index: number, touch: boolean) {
@@ -548,6 +600,8 @@ function onClick(event: MouseEvent) {
   const act = target.dataset.act ?? "";
   const arg = target.dataset.arg ?? "";
   if (act === "stop" || act === "seed") return;
+  lastClick = target.getBoundingClientRect();
+  let gained: "card" | "relic" | "heal" | null = null;
   unlockAudio();
   const touch = (event as PointerEvent).pointerType === "touch" || (event as PointerEvent).pointerType === "pen";
 
@@ -654,44 +708,44 @@ function onClick(event: MouseEvent) {
     app.selectedNode = arg;
     sfx("click");
   } else if (act === "fly" && app.run) {
-    const result = enterNode(app.run, app.meta, arg);
-    if (!result.ok) toast(result.message ?? "Can't fly there.", "bad");
-    else {
-      app.selectedNode = null;
-      app.targetUid = null;
-      app.armed = null;
-      sfx("turn");
-    }
+    void flyTo(arg);
+    return;
   } else if (act === "take-card" && app.run) {
     const result = takeRewardCard(app.run, arg);
     if (!result.ok) toast(result.message ?? "No.", "bad");
     else {
       toast(result.message ?? "");
-      sfx("play");
+      sfx("flip");
+      gained = "card";
     }
   } else if (act === "take-relic" && app.run) {
     const result = takeRewardRelic(app.run, app.meta);
     toast(result.message ?? "", result.ok ? "info" : "bad");
     sfx(result.ok ? "unlock" : "error");
+    if (result.ok) gained = "relic";
   } else if (act === "take-heal" && app.run) {
     const result = takeRewardHeal(app.run);
     toast(result.message ?? "", result.ok ? "info" : "bad");
     sfx(result.ok ? "heal" : "error");
+    if (result.ok) gained = "heal";
   } else if (act === "ack-reward" && app.run) {
     ackReward(app.run, app.meta);
     sfx("click");
   } else if (act === "buy-card" && app.run) {
     const result = buyShopCard(app.run, Number(arg));
     toast(result.message ?? "", result.ok ? "info" : "bad");
-    sfx(result.ok ? "play" : "error");
+    sfx(result.ok ? "flip" : "error");
+    if (result.ok) gained = "card";
   } else if (act === "buy-relic" && app.run) {
     const result = buyShopRelic(app.run, app.meta, Number(arg));
     toast(result.message ?? "", result.ok ? "info" : "bad");
     sfx(result.ok ? "unlock" : "error");
+    if (result.ok) gained = "relic";
   } else if (act === "buy-heal" && app.run) {
     const result = buyShopHeal(app.run);
     toast(result.message ?? "", result.ok ? "info" : "bad");
     sfx(result.ok ? "heal" : "error");
+    if (result.ok) gained = "heal";
   } else if (act === "open-remove" && app.run) {
     const result = openRemoval(app.run);
     if (!result.ok) toast(result.message ?? "Can't.", "bad");
@@ -724,7 +778,72 @@ function onClick(event: MouseEvent) {
   persist();
   const intoFight = app.view === "run" && app.run?.screen === "combat" && (beforeScreen !== "combat" || beforeView !== "run");
   draw();
+  if (gained) pickup(gained, lastClick);
+  if (act === "pick-jet") {
+    pulse(".hangar-jet", "swap");
+    pulse(".hangar-info", "swap");
+  } else if (act === "select-node") pulse(".brief-slip.has", "pop");
   if (intoFight) void enterFight(beforeScreen === "map");
+}
+
+/** Something bought or taken flies from where it was picked to where it now lives in the top bar. */
+function pickup(kind: "card" | "relic" | "heal", from: DOMRect | null) {
+  if (kind === "card") {
+    sparkle(from, C.cyan);
+    void flyTokens(from, rectOfSel('.hud-btn[data-act="deck"]'), "card", 1, C.cyan).then(() => pulse('.hud-btn[data-act="deck"]', "bump"));
+  } else if (kind === "relic") {
+    sparkle(from, C.gold);
+    void flyTokens(from, rectOfSel(".hud-relics .relic:last-child") ?? rectOfSel(".hud-relics"), "relic", 1, C.gold).then(() => pulse(".hud-relics .relic:last-child", "bump"));
+  } else {
+    sparkle(from, C.heal);
+    void flyTokens(from, rectOfSel(".hud-hp .ico"), "relic", 4, C.heal).then(() => pulse(".hud-hp", "gain"));
+  }
+}
+
+/** Flies the map marker along the chart to the picked plot, then enters it. */
+async function flyTo(nodeId: string) {
+  const run = app.run;
+  if (!run || busy) return;
+  const beforeScreen = run.screen;
+  const beforeNotices = run.notices.length;
+  if (run.screen === "map" && reachable(run).some((node) => node.id === nodeId) && !reduced()) {
+    const node = root!.querySelector<HTMLElement>(`.node[data-arg="${nodeId}"]`);
+    const marker = root!.querySelector<HTMLElement>(".you-marker");
+    busy = true;
+    sfx("travel");
+    try {
+      node?.classList.add("bound");
+      if (node && marker) {
+        const dx = node.offsetLeft - marker.offsetLeft;
+        const dy = node.offsetTop - marker.offsetTop;
+        const tilt = Math.max(-40, Math.min(40, (Math.atan2(dx, -dy) * 180) / Math.PI));
+        marker.classList.add("flying");
+        marker.animate(
+          [
+            { translate: "0 0", rotate: "0deg", scale: "1" },
+            { translate: `${(dx * 0.5).toFixed(0)}px ${(dy * 0.5 - 14).toFixed(0)}px`, rotate: `${tilt.toFixed(0)}deg`, scale: "1.35", offset: 0.5 },
+            { translate: `${dx}px ${dy}px`, rotate: "0deg", scale: "1" },
+          ],
+          { duration: 520, easing: "cubic-bezier(.45,.05,.3,1)", fill: "forwards" },
+        );
+        await wait(540);
+      } else await wait(320);
+    } finally {
+      busy = false;
+    }
+  }
+  const result = enterNode(run, app.meta, nodeId);
+  if (!result.ok) toast(result.message ?? "Can't fly there.", "bad");
+  else {
+    app.selectedNode = null;
+    app.targetUid = null;
+    app.armed = null;
+    sfx("turn");
+  }
+  after(beforeScreen, beforeNotices);
+  persist();
+  draw();
+  if (run.screen === "combat" && beforeScreen !== "combat") void enterFight(beforeScreen === "map");
 }
 
 async function enterFight(fromMap: boolean) {
@@ -815,7 +934,7 @@ window.addEventListener("resize", () => {
   }, 140);
 });
 
-if (import.meta.env.DEV) (window as unknown as { __dogfight: unknown }).__dogfight = { app, draw, persist };
+if (import.meta.env.DEV) (window as unknown as { __dogfight: unknown }).__dogfight = { app, draw, persist, setSlowMo, particleCount, effectCount };
 (window as unknown as { __dogfightAudio: unknown }).__dogfightAudio = audioDebug;
 
 draw();

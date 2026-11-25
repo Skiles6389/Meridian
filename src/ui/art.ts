@@ -211,15 +211,6 @@ export function cardArt(id: string): string {
   return CARD_ART[cardTheme(id)] ?? "";
 }
 
-/** How an attack card's shot travels on the battle stage. */
-export function shotStyle(id: string): "tracer" | "missile" | "heavy" | "zap" {
-  const theme = cardTheme(id);
-  if (theme === "gun" || theme === "dogfight" || theme === "cannon") return "tracer";
-  if (theme === "heavy" || theme === "cluster") return "heavy";
-  if (theme === "surge" || theme === "jam" || theme === "radar") return "zap";
-  return "missile";
-}
-
 export function eventArt(id: string): string {
   return EVENT_ART[id] ?? EVENT_ART.hardstand ?? "";
 }
