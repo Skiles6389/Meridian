@@ -33,7 +33,7 @@ npm run build:single
 
 1. Pick a jet and a difficulty in the hangar. Only the **F-16C Fighting Falcon** is available on a fresh browser.
 2. Each act is a fully visible branching map. Choose a lane, then the next connected plot.
-3. Fights are turn-based and seen from a chase camera just behind and above your jet. You draw 5 cards, spend Energy, then end the turn. On your turn the camera sits close on your tail and looks ahead at the bandits, with a HUD bracket on the one you are tracking; tap or click a jet to pick your target. Each enemy telegraphs its next action with an intent icon above it, and its hull, Shield, and statuses sit just below. Your own hull, Shield, statuses, and powers are on the pilot panel. When you end the turn the camera pulls back and widens, the enemies bank around to face you, and their attack runs come in at the camera; it pushes back in when your next turn starts.
+3. Fights are turn-based and seen from a chase camera just behind and above your jet. You draw 5 cards, spend Energy, then end the turn. On your turn the camera sits close on your tail and looks ahead at the bandits, with a HUD bracket on the one you are tracking; tap or click a jet to pick your target. Each enemy telegraphs its next action with an intent icon above it, and its hull, Shield, and statuses sit just below. Your own hull, Shield, statuses, and powers are on the pilot panel. When you end the turn the camera pulls well back to a wide external view of your jet and the airspace around it. Each attacking bandit flies a break turn: it sweeps out to the side, comes round, and settles onto your six, banking along the curve and trailing vapour. While they are behind you the tag reads "Bandits on your six". From there they fire forward at your jet, and the hits, blocks, and dodges land on it. Bandits that are only shielding or buffing roll in place. Then they overshoot back out ahead of you, and the camera pushes back in for your turn. With reduced motion turned on, the bandits move straight to the six and back without the flight.
 4. HP carries from fight to fight. It rises only when something heals you: a card, a relic, a reward, a depot, or an event.
 5. Clear the act boss to generate the next corridor. Clear Act 3's boss, **Nebelhorn**, to win.
 
@@ -105,7 +105,7 @@ Enemies are real German-operated types flown by fictional flights with animal an
 Painted art lives in `src/assets/art/` as WebP (about 2.4 MB in total):
 
 - `jets/`: 17 side-view airframes on transparent backgrounds, used in the hangar, title, and HUD. `jets.json` records each image's aspect ratio and nozzle position, which the game uses to place the afterburner glow.
-- `chase/`: 25 chase-camera sprites: a rear view of each of the five player jets and of each enemy airframe, plus a front-quarter view of each enemy for when it turns in to attack. `chase.json` records each sprite's aspect ratio and lit nozzles for the afterburner flicker.
+- `chase/`: 25 chase-camera sprites: a rear view of each of the five player jets and of each enemy airframe, plus a front-quarter view of each enemy for when it comes round toward the camera in a break turn. `chase.json` records each sprite's aspect ratio and lit nozzles for the afterburner flicker.
 - `scenes/`: act skies (stormy sea, river valley at dusk, high altitude under the aurora), high-altitude chase-camera versions of each for battles, drifting fog layers, the hangar, the depot, and the briefing-chart paper.
 - `cards/`: 20 illustration themes that the cards map onto by effect.
 - `events/`: one scene per mystery, plus the gamble and intermission screens.
@@ -120,7 +120,7 @@ Painted art lives in `src/assets/art/` as WebP (about 2.4 MB in total):
 - Combat: damage, Shield, Burn, Evasion, Locked, Jam, the Kite's Energy discount, and a play-through of every card
 - Sortie flow: HP does not reset after a fight, the F-15E unlocks when Graue Eule goes down, depots sell cards and repairs
 - Content: every jet, enemy, card, and event has art; a pre-re-skin combat save loads with the new names
-- Chase camera: every player jet has a rear view and every enemy has rear and front views; foes stay inside the frame and clear of each other on desktop, phone portrait, and phone landscape; the enemy-turn shot pulls back so everything shrinks
+- Chase camera: every player jet has a rear view and every enemy has rear and front views; foes stay inside the frame and clear of each other on desktop, phone portrait, and phone landscape; the enemy-turn shot pulls back well over twice as wide; the six slots sit behind and below your jet without overlapping; the break turn sweeps out wide, comes round, and arrives tail-on (also on a wide, short landscape stage), and the overshoot stays tail-on; heading picks the rear, profile, or front-quarter painting
 - A scripted interceptor build can kill the Act 1 boss
 - Seeded autopilot sorties reach Act 2
 - Balance simulator smoke test: both bots fly full sorties on every jet without errors at Rookie, Normal, Threat 5, and Threat 10, a seed replays identically, the smarter bot clears some but not all starter-jet sorties, and runs go deeper on Rookie than on Normal and deeper on Normal than on Threat 10
