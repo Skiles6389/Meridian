@@ -42,6 +42,8 @@ export interface FlightLook {
   cover: Rgb;
   /** Far ridges on the horizon: height in screen heights, how sparse they are, and their two tones. */
   ridge: { height: number; gap: number; freq: number; dark: Rgb; lit: Rgb } | null;
+  /** What a jet that goes down hits: it throws up a column of water, or dust and earth. */
+  surface: "water" | "land";
 }
 
 export const FLIGHT_LOOKS: Record<number, FlightLook> = {
@@ -59,6 +61,7 @@ export const FLIGHT_LOOKS: Record<number, FlightLook> = {
     cloudShade: [0.2, 0.24, 0.42],
     cover: [0.3, 0.34, 0.42],
     ridge: { height: 0.03, gap: 0.6, freq: 0.9, dark: [0.07, 0.1, 0.2], lit: [0.5, 0.3, 0.3] },
+    surface: "water",
   },
   // The river valley at sunset, with hill country out to the horizon.
   2: {
@@ -74,6 +77,7 @@ export const FLIGHT_LOOKS: Record<number, FlightLook> = {
     cloudShade: [0.5, 0.38, 0.5],
     cover: [0.26, 0.3, 0.3],
     ridge: { height: 0.07, gap: 0.2, freq: 1.5, dark: [0.16, 0.12, 0.24], lit: [0.72, 0.42, 0.34] },
+    surface: "land",
   },
   // Glass Meridian: very high over a polar sea under the aurora.
   3: {
@@ -89,6 +93,7 @@ export const FLIGHT_LOOKS: Record<number, FlightLook> = {
     cloudShade: [0.2, 0.3, 0.62],
     cover: [0.2, 0.26, 0.22],
     ridge: null,
+    surface: "water",
   },
 };
 
@@ -139,6 +144,92 @@ const clock = () => performance.now() / 1000;
 export function swayStyle(): string {
   const s = swayAt(clock(), prefersStill());
   return `translate:${s.x.toFixed(2)}% ${s.y.toFixed(2)}%;rotate:${s.roll.toFixed(2)}deg`;
+}
+
+/* ------------------------------------------------------------------ ground */
+
+/** How the ground plane is framed on screen at one moment: what the shader is given, in CSS pixels. */
+export interface GroundView {
+  w: number;
+  h: number;
+  /** The horizon's height on screen, from the top, 0 to 1. */
+  hz: number;
+  roll: number;
+  pitch: number;
+  zoom: number;
+}
+
+/** A place on the ground relative to the camera: `x` to the right, `z` ahead. */
+export interface GroundSpot {
+  x: number;
+  z: number;
+}
+
+/** Where a ground spot shows on screen: `scale` is pixels per unit across, `tilt` how flat a circle lying there looks. */
+export interface GroundPoint {
+  x: number;
+  y: number;
+  scale: number;
+  tilt: number;
+}
+
+/** The ground under a screen point, by the same projection the shader draws with; null above the horizon. */
+export function groundAt(v: GroundView, px: number, py: number): GroundSpot | null {
+  const qx = (px / v.w - 0.5) * (v.w / v.h);
+  const qy = py / v.h - 0.5;
+  const c = Math.cos(v.roll);
+  const s = Math.sin(v.roll);
+  const x = (c * qx - s * qy) / v.zoom;
+  const y = (s * qx + c * qy - (v.hz - 0.5)) / v.zoom - v.pitch;
+  return y > 0.0012 ? { x: x / y, z: 1 / y } : null;
+}
+
+/** Where a ground spot is on screen; null once it has passed under the camera. */
+export function screenAt(v: GroundView, g: GroundSpot): GroundPoint | null {
+  if (g.z <= 0.4) return null;
+  const d = 1 / g.z;
+  const rx = g.x * d * v.zoom;
+  const ry = (d + v.pitch) * v.zoom + (v.hz - 0.5);
+  const c = Math.cos(v.roll);
+  const s = Math.sin(v.roll);
+  return {
+    x: ((c * rx + s * ry) / (v.w / v.h) + 0.5) * v.w,
+    y: (c * ry - s * rx + 0.5) * v.h,
+    scale: d * v.zoom * v.h,
+    tilt: Math.min(1, d),
+  };
+}
+
+let view: GroundView | null = null;
+/** Distance flown since the page loaded, never wrapped: what a spot on the ground is measured against. */
+const flown = { x: 0, y: 0 };
+
+/** The horizon's height on screen in pixels from the top, while a fight's backdrop is up. */
+export function horizonY(): number | null {
+  return view && act ? view.hz * view.h + view.pitch * view.zoom * view.h : null;
+}
+
+/** What the ground is under the fight in progress. */
+export function groundSurface(): "water" | "land" {
+  return FLIGHT_LOOKS[act]?.surface ?? "water";
+}
+
+/**
+ * Pins a screen point to the ground under it. The returned function gives where that spot is on
+ * screen now, with its size relative to when it was pinned: it slides toward the camera as the
+ * world flies past, and gives null once it is gone. Where nothing moves, the spot stays put.
+ */
+export function groundTrack(px: number, py: number): () => GroundPoint | null {
+  // Without the renderer the backdrop is a still painting, so nothing on it should slide.
+  const here = view && act && gpu && !failed ? groundAt(view, px, py) : null;
+  const first = here && view ? screenAt(view, here) : null;
+  if (!here || !first) return () => ({ x: px, y: py, scale: 1, tilt: 0.14 });
+  const gx = here.x + flown.x;
+  const gz = here.z + flown.y;
+  return () => {
+    const p = view ? screenAt(view, { x: gx - flown.x, z: gz - flown.y }) : null;
+    return p ? { x: p.x, y: p.y, scale: p.scale / first.scale, tilt: p.tilt } : null;
+  };
 }
 
 /* ------------------------------------------------------------------ shader */
@@ -495,8 +586,15 @@ function render(now: number) {
   const trail = swayAt(t - 0.35, still);
   const bank = (trail.roll * Math.PI) / 180;
   yaw += bank * dt * 1.4;
-  travel.y = (travel.y + look.speed * pace * dt) % 4096;
-  travel.x = (travel.x + (bank * 1.6 + 0.045) * look.speed * pace * dt) % 4096;
+  const ahead = look.speed * pace * dt;
+  const across = (bank * 1.6 + 0.045) * look.speed * pace * dt;
+  travel.y = (travel.y + ahead) % 4096;
+  travel.x = (travel.x + across) % 4096;
+  flown.y += ahead;
+  flown.x += across;
+  const cssW = canvas.clientWidth || window.innerWidth;
+  const cssH = canvas.clientHeight || window.innerHeight;
+  view = { w: cssW, h: cssH, hz: horizonOn(canvas.width, canvas.height), roll: -bank * 0.7, pitch: -trail.y * 0.0035, zoom };
   const ally = document.querySelector<HTMLElement>(".ally .unit-art");
   if (ally) {
     ally.style.translate = `${jet.x.toFixed(2)}% ${jet.y.toFixed(2)}%`;
@@ -519,9 +617,9 @@ function render(now: number) {
   gl.uniform1i(u.uGround, 1);
   gl.uniform1i(u.uNoise, 2);
   gl.uniform2f(u.uRes, canvas.width, canvas.height);
-  gl.uniform1f(u.uHz, horizonOn(canvas.width, canvas.height));
-  gl.uniform1f(u.uRoll, -bank * 0.7);
-  gl.uniform1f(u.uPitch, -trail.y * 0.0035);
+  gl.uniform1f(u.uHz, view.hz);
+  gl.uniform1f(u.uRoll, view.roll);
+  gl.uniform1f(u.uPitch, view.pitch);
   gl.uniform1f(u.uZoom, zoom);
   gl.uniform1f(u.uYaw, yaw);
   gl.uniform2f(u.uTravel, travel.x, travel.y);
