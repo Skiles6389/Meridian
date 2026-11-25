@@ -4,7 +4,7 @@ A roguelike deck-builder about holding three air corridors. You fly one real-wor
 
 The aircraft are real types: you fly an F-16C, F-15E, F-22A, EA-18G, or A-10C against German-operated Starfighters, Alpha Jets, Phantoms, Fulcrums, Tornados, Eurofighters, and the F-35A. Squadrons, callsigns, and the conflict itself are fictional, and every airframe wears neutral markings. No historical or national insignia appear anywhere.
 
-All art is original and painted for this game: side-view jets, layered act skies, a hand-drawn briefing chart, card illustrations, and event scenes. The look leans lightly toward aviation anime: cel shading, clean ink linework, flatter color with crisp highlights, and drifting speed lines over the skies, while the airframes stay true to the real types.
+All art is original and painted for this game: side views and chase-camera rear and front views of every jet, layered act skies, a hand-drawn briefing chart, card illustrations, and event scenes. The look leans lightly toward aviation anime: cel shading, clean ink linework, flatter color with crisp highlights, and drifting speed lines over the skies, while the airframes stay true to the real types.
 
 **Play in a browser:** [htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/dogfight.html](https://htmlpreview.github.io/?https://github.com/Skiles6389/Meridian/blob/main/play/dogfight.html) (the older `play/meridian.html` link serves the same build)
 
@@ -33,7 +33,7 @@ npm run build:single
 
 1. Pick a jet and a difficulty in the hangar. Only the **F-16C Fighting Falcon** is available on a fresh browser.
 2. Each act is a fully visible branching map. Choose a lane, then the next connected plot.
-3. Fights are turn-based tail chases. You draw 5 cards, spend Energy, then end the turn. Enemies telegraph their next action with an intent icon above the jet. Every jet faces the same way and the attacker flies behind: on your turn you sit on the enemies' tails, and when you end the turn the jets swing past each other so the enemies close in on your six.
+3. Fights are turn-based and seen from a chase camera just behind and above your jet. You draw 5 cards, spend Energy, then end the turn. On your turn the camera sits close on your tail and looks ahead at the bandits, with a HUD bracket on the one you are tracking; tap or click a jet to pick your target. Each enemy telegraphs its next action with an intent icon above it, and its hull, Shield, and statuses sit just below. Your own hull, Shield, statuses, and powers are on the pilot panel. When you end the turn the camera pulls back and widens, the enemies bank around to face you, and their attack runs come in at the camera; it pushes back in when your next turn starts.
 4. HP carries from fight to fight. It rises only when something heals you: a card, a relic, a reward, a depot, or an event.
 5. Clear the act boss to generate the next corridor. Clear Act 3's boss, **Nebelhorn**, to win.
 
@@ -102,14 +102,15 @@ Enemies are real German-operated types flown by fictional flights with animal an
 
 ## Art
 
-Painted art lives in `src/assets/art/` as WebP (about 1.5 MB in total):
+Painted art lives in `src/assets/art/` as WebP (about 2.4 MB in total):
 
-- `jets/`: 17 side-view airframes on transparent backgrounds. `jets.json` records each image's aspect ratio and nozzle position, which the game uses to place the afterburner glow.
-- `scenes/`: act skies (stormy sea, river valley at dusk, high altitude under the aurora), drifting fog layers, the hangar, the depot, and the briefing-chart paper.
+- `jets/`: 17 side-view airframes on transparent backgrounds, used in the hangar, title, and HUD. `jets.json` records each image's aspect ratio and nozzle position, which the game uses to place the afterburner glow.
+- `chase/`: 25 chase-camera sprites: a rear view of each of the five player jets and of each enemy airframe, plus a front-quarter view of each enemy for when it turns in to attack. `chase.json` records each sprite's aspect ratio and lit nozzles for the afterburner flicker.
+- `scenes/`: act skies (stormy sea, river valley at dusk, high altitude under the aurora), high-altitude chase-camera versions of each for battles, drifting fog layers, the hangar, the depot, and the briefing-chart paper.
 - `cards/`: 20 illustration themes that the cards map onto by effect.
 - `events/`: one scene per mystery, plus the gamble and intermission screens.
 
-`tools/process-art.py` is the pipeline that turned the raw paintings into these files: it keys the jets out of a flat backdrop, crops them, measures nozzles, and resizes and compresses everything. The raw sources are not checked in.
+`tools/process-art.py` is the pipeline that turned the raw paintings into these files: it keys the jets out of a flat backdrop, crops them, measures nozzles (side views) or finds the lit nozzle glow (chase views), and resizes and compresses everything. The raw sources are not checked in.
 
 ## Tests
 
@@ -119,6 +120,7 @@ Painted art lives in `src/assets/art/` as WebP (about 1.5 MB in total):
 - Combat: damage, Shield, Burn, Evasion, Locked, Jam, the Kite's Energy discount, and a play-through of every card
 - Sortie flow: HP does not reset after a fight, the F-15E unlocks when Graue Eule goes down, depots sell cards and repairs
 - Content: every jet, enemy, card, and event has art; a pre-re-skin combat save loads with the new names
+- Chase camera: every player jet has a rear view and every enemy has rear and front views; foes stay inside the frame and clear of each other on desktop, phone portrait, and phone landscape; the enemy-turn shot pulls back so everything shrinks
 - A scripted interceptor build can kill the Act 1 boss
 - Seeded autopilot sorties reach Act 2
 - Balance simulator smoke test: both bots fly full sorties on every jet without errors at Rookie, Normal, Threat 5, and Threat 10, a seed replays identically, the smarter bot clears some but not all starter-jet sorties, and runs go deeper on Rookie than on Normal and deeper on Normal than on Threat 10
