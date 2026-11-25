@@ -944,6 +944,15 @@
   animation-delay: 0.74s;
 }
 
+.title-menu {
+  width: min(360px, 100%);
+}
+
+.title-row .btn {
+  white-space: nowrap;
+  padding-inline: 0.9em;
+}
+
 .logo-word {
   background: linear-gradient(180deg, #fff9ea 12%, #f4d28a 48%, #c88a34 78%, #8a5a1c);
   -webkit-background-clip: text;
