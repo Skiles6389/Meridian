@@ -405,6 +405,99 @@ button {
   background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.6));
 }
 
+/* Chase camera backdrop: the sky zooms with the battle camera and rushes outward. */
+.sc-chase .sc-sky {
+  scale: 1.14;
+  transition: translate 0.8s ease-out, scale 1s cubic-bezier(0.62, 0.02, 0.28, 1);
+  animation: chase-drift 26s ease-in-out infinite alternate;
+}
+
+html[data-cam="wide"] .sc-chase .sc-sky {
+  scale: 1.02;
+}
+
+@keyframes chase-drift {
+  from {
+    transform: rotate(-1.2deg);
+  }
+  to {
+    transform: rotate(1.2deg) translateY(-1.5%);
+  }
+}
+
+.sc-wisps,
+.sc-rush {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.wisp {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: calc(var(--s) * 34vmax);
+  height: calc(var(--s) * 9vmax);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(235, 242, 250, 0.55), rgba(235, 242, 250, 0.18) 60%, transparent);
+  filter: blur(6px);
+  opacity: 0;
+  animation: wisp var(--t) cubic-bezier(0.55, 0, 0.9, 0.5) var(--d) infinite;
+}
+
+@keyframes wisp {
+  0% {
+    transform: translate(-50%, -50%) translate(calc(var(--x) * 0.1), calc(var(--y) * 0.1)) scale(0.12);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(-50%, -50%) translate(calc(var(--x) * 2.4), calc(var(--y) * 1.8)) scale(1.6);
+    opacity: 0;
+  }
+}
+
+.sc-act2 .wisp,
+.sc-chase-act2 .wisp {
+  background: radial-gradient(closest-side, rgba(250, 214, 170, 0.45), rgba(240, 180, 130, 0.14) 60%, transparent);
+}
+
+.sc-chase-act3 .wisp {
+  background: radial-gradient(closest-side, rgba(190, 210, 255, 0.3), rgba(160, 190, 255, 0.1) 60%, transparent);
+}
+
+.rush {
+  position: absolute;
+  left: 50%;
+  top: 44%;
+  width: calc(var(--s) * 18vmax);
+  height: 2px;
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55));
+  opacity: 0;
+  animation: rush var(--t) linear var(--d) infinite;
+}
+
+@keyframes rush {
+  0% {
+    transform: rotate(var(--a)) translateX(8vmax) scaleX(0.2);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: rotate(var(--a)) translateX(70vmax) scaleX(1.4);
+    opacity: 0;
+  }
+}
+
+html[data-cam="wide"] .rush {
+  animation-duration: calc(var(--t) * 1.6);
+}
+
 /* ------------------------------------------------------------- buttons */
 
 .btn {
@@ -2344,11 +2437,21 @@ button.card {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  --cam-ease: cubic-bezier(0.62, 0.02, 0.28, 1);
+  --cam-time: 0.9s;
+  --hud-c: #a9ffc8;
+  --lock-c: #ff5a3a;
 }
 
+/*
+ * The chase camera. Foes and the player's jet carry their close (--c*) and wide (--w*) framing
+ * from camera.ts; `cam-wide` swaps between them and the transitions are the camera move.
+ */
 .stage {
   position: absolute;
   inset: 0 0 var(--tray-h, 190px) 0;
+  container-type: size;
+  --u: min(1cqw, 1.8cqh);
 }
 
 .contact-tag {
@@ -2364,7 +2467,7 @@ button.card {
   clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 14px 100%);
   font-family: var(--cond);
   white-space: nowrap;
-  z-index: 3;
+  z-index: 6;
 }
 
 .contact-tag span {
@@ -2382,94 +2485,12 @@ button.card {
   text-transform: uppercase;
 }
 
-.ally {
+.threat-tag {
   position: absolute;
-  left: 3%;
-  top: 50%;
-  width: min(32vw, 440px);
-  transform: translateY(-46%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.foes {
-  position: absolute;
-  right: 3%;
-  top: 0;
-  bottom: 0;
-  left: 42%;
-  display: flex;
-  align-items: center;
-  justify-content: space-evenly;
-  gap: 8px;
-}
-
-.foe {
-  position: relative;
-  width: min(28vw, 400px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  cursor: pointer;
-  transition: opacity 0.4s ease, filter 0.2s ease;
-}
-
-.n2 .foe {
-  width: min(22vw, 290px);
-}
-
-.n3 .foe {
-  width: min(18vw, 240px);
-}
-
-.n2 .foe:nth-child(2),
-.n3 .foe:nth-child(2) {
-  margin-top: 70px;
-}
-
-.n3 .foe:nth-child(3) {
-  margin-top: -30px;
-}
-
-.foe.boss {
-  width: min(32vw, 430px);
-}
-
-.unit-art {
-  position: relative;
-  width: 100%;
-  animation: hover-bob 4.6s ease-in-out infinite;
-}
-
-.foe .unit-art {
-  animation-duration: 5.2s;
-  animation-delay: calc(var(--slot) * -1.3s);
-}
-
-.foe.down {
-  visibility: hidden;
-  pointer-events: none;
-}
-
-/* Tail chase: every jet faces right and the attacking side flies behind (on the left). */
-.stage.chase-enemy .ally {
-  left: auto;
-  right: 3%;
-}
-
-.stage.chase-enemy .foes {
-  left: 3%;
-  right: 42%;
-}
-
-.stage.chase-enemy .ally::before {
-  content: "Bandits on your six";
-  position: absolute;
-  top: -6px;
+  top: 48px;
   left: 50%;
-  transform: translate(-50%, -100%);
-  padding: 3px 12px 4px;
+  translate: -50% 0;
+  padding: 3px 14px 4px;
   border-radius: 3px;
   background: linear-gradient(180deg, #d9473a, #9c2219);
   box-shadow: 0 0 0 2px #1a0806, 0 4px 14px rgba(0, 0, 0, 0.5);
@@ -2480,7 +2501,16 @@ button.card {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   white-space: nowrap;
-  z-index: 2;
+  z-index: 6;
+  opacity: 0;
+  scale: 0.8;
+  pointer-events: none;
+  transition: opacity 0.3s, scale 0.3s;
+}
+
+.cam-wide .threat-tag {
+  opacity: 1;
+  scale: 1;
   animation: six-warn 0.9s ease-in-out infinite alternate;
 }
 
@@ -2490,38 +2520,294 @@ button.card {
   }
 }
 
-.surging .burner {
-  filter: blur(1px) brightness(1.7) saturate(1.3);
+/* Head-up display: gun cross, pitch ladder, and speed and altitude tapes. */
+.cam-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: var(--hud-c);
+  font-family: var(--cond);
+  font-weight: 700;
+  text-shadow: 0 0 6px rgba(80, 255, 150, 0.5), 0 1px 2px rgba(0, 0, 0, 0.8);
+  opacity: 0.75;
+  transition: opacity var(--cam-time);
+  z-index: 1;
 }
 
-.braking .burner {
-  filter: blur(2px) brightness(0.45);
+.cam-wide .cam-hud {
+  opacity: 0.35;
 }
 
-.stage.swapping::after {
+.hud-cross {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  width: 34px;
+  height: 34px;
+  translate: -50% -50%;
+  background:
+    linear-gradient(currentColor, currentColor) center / 2px 34% no-repeat,
+    linear-gradient(currentColor, currentColor) center / 34% 2px no-repeat;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  filter: drop-shadow(0 0 4px rgba(80, 255, 150, 0.6));
+}
+
+.hud-ladder {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  width: min(30cqw, 300px);
+  height: 2px;
+  translate: -50% 0;
+  background: linear-gradient(90deg, currentColor 0 30%, transparent 30% 70%, currentColor 70%);
+  opacity: 0.55;
+}
+
+.hud-tape {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 8px;
+  border: 1.5px solid currentColor;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-tape small {
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  opacity: 0.8;
+}
+
+.hud-tape.spd {
+  left: 18%;
+}
+
+.hud-tape.alt {
+  right: 18%;
+  text-align: right;
+}
+
+/* Chase-view sprites: rear views of every jet, and front quarters of foes turning in. */
+.cj {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--ar);
+}
+
+.cj img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+  filter: drop-shadow(0 10px 12px rgba(0, 0, 0, 0.42));
+}
+
+.cj.flip img {
+  transform: scaleX(-1);
+}
+
+.cj-glow {
+  position: absolute;
+  left: var(--gx);
+  top: var(--gy);
+  width: calc(var(--gr) * 3.4);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0 14%, #ffe6a8 26%, #ff9a3c 46%, rgba(255, 80, 30, 0.4) 62%, transparent 72%);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  animation: nozzle 0.1s steps(2) infinite alternate;
+}
+
+.cj-glow::after {
   content: "";
   position: absolute;
-  inset: 8% -20%;
-  pointer-events: none;
-  background: repeating-linear-gradient(180deg, transparent 0 23px, rgba(235, 245, 255, 0.16) 23px 25px, transparent 25px 61px);
-  mask-image: linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent);
-  mix-blend-mode: screen;
-  animation: swap-streaks 0.78s linear forwards;
+  left: 50%;
+  top: 50%;
+  width: 70%;
+  height: 150%;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 0, rgba(255, 200, 120, 0.85), rgba(255, 110, 40, 0.3) 45%, transparent 72%);
+  filter: blur(2px);
 }
 
-@keyframes swap-streaks {
-  0% {
-    translate: 12% 0;
-    opacity: 0;
+@keyframes nozzle {
+  to {
+    opacity: 0.72;
+    scale: 0.9;
   }
-  25%,
-  70% {
-    opacity: 1;
-  }
+}
+
+.cam-wide .foe .cj-glow {
+  opacity: 0;
+}
+
+.foes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.foe {
+  position: absolute;
+  left: calc(var(--cx) * 1%);
+  top: calc(var(--cy) * 1%);
+  width: min(calc(var(--cs) * var(--u)), calc(var(--box, 2.4) * 25cqh));
+  translate: -50% -50%;
+  pointer-events: auto;
+  cursor: pointer;
+  transition:
+    left var(--cam-time) var(--cam-ease),
+    top var(--cam-time) var(--cam-ease),
+    width var(--cam-time) var(--cam-ease),
+    opacity 0.4s ease,
+    filter 0.2s ease;
+}
+
+.cam-wide .foe {
+  left: calc(var(--wx) * 1%);
+  top: calc(var(--wy) * 1%);
+  width: min(calc(var(--ws) * var(--u)), calc(var(--box, 2.4) * 22cqh));
+}
+
+.foe > .intent {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  translate: -50% 0;
+}
+
+.foe > .unit-hud {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  translate: -50% 0;
+  width: clamp(104px, 100%, 230px);
+}
+
+.unit-art {
+  position: relative;
+  width: 100%;
+  animation: hover-bob 4.6s ease-in-out infinite;
+}
+
+.foe .unit-art {
+  aspect-ratio: var(--box, 2.4);
+  animation-duration: 5.2s;
+  animation-delay: calc(var(--slot) * -1.3s);
+}
+
+.foe .cj {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: 0 -50%;
+  transition:
+    opacity 0.32s ease,
+    transform 0.75s var(--cam-ease);
+  transition-delay: calc(0.18s + var(--slot) * 0.14s);
+}
+
+/* Banking around: the rear view rolls away as the front quarter rolls in. */
+.foe .cj-front {
+  opacity: 0;
+  transform: perspective(700px) rotateY(75deg) rotate(-16deg) scale(0.85);
+}
+
+.foe .cj-front.flip {
+  transform: perspective(700px) rotateY(-75deg) rotate(16deg) scale(0.85);
+}
+
+.cam-wide .foe .cj-rear {
+  opacity: 0;
+  transform: perspective(700px) rotateY(-75deg) rotate(18deg) scale(0.9);
+}
+
+.cam-wide .foe .cj-front {
+  opacity: 1;
+  transform: none;
+}
+
+.foe.down {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ally {
+  position: absolute;
+  left: calc(var(--cx) * 1%);
+  bottom: calc(var(--cy) * 1%);
+  width: calc(var(--cs) * var(--u));
+  translate: -50% 0;
+  pointer-events: none;
+  z-index: 3;
+  transition:
+    left var(--cam-time) var(--cam-ease),
+    bottom var(--cam-time) var(--cam-ease),
+    width var(--cam-time) var(--cam-ease);
+}
+
+.cam-wide .ally {
+  left: calc(var(--wx) * 1%);
+  bottom: calc(var(--wy) * 1%);
+  width: calc(var(--ws) * var(--u));
+}
+
+.ally .unit-art {
+  animation: chase-sway 7s ease-in-out infinite;
+}
+
+@keyframes chase-sway {
+  0%,
   100% {
-    translate: -12% 0;
-    opacity: 0;
+    transform: translate(0, 0) rotate(0);
   }
+  30% {
+    transform: translate(-1.2%, -2%) rotate(-1.6deg);
+  }
+  65% {
+    transform: translate(1.4%, 1%) rotate(1.4deg);
+  }
+}
+
+/* The pilot's own panel: callsign, hull and shield, statuses, and powers. */
+.pilot {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 12px 10px;
+  background: linear-gradient(180deg, rgba(8, 16, 18, 0.72), rgba(8, 14, 18, 0.5));
+  box-shadow: inset 0 0 0 1px rgba(169, 255, 200, 0.28), 0 6px 18px rgba(0, 0, 0, 0.35);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  z-index: 5;
+}
+
+.pilot .nameplate {
+  align-items: flex-start;
+}
+
+.pilot .nameplate b {
+  color: var(--hud-c);
+}
+
+.pilot .st-row:empty {
+  display: none;
 }
 
 .foe.crashing .unit-art {
@@ -2536,14 +2822,14 @@ button.card {
 
 @keyframes crash {
   0% {
-    transform: translate(0, 0) rotate(0);
+    transform: translate(0, 0) rotate(0) scale(1);
     filter: brightness(1);
   }
   15% {
     filter: brightness(2.5);
   }
   100% {
-    transform: translate(70px, 180px) rotate(26deg);
+    transform: translate(30%, 180%) rotate(70deg) scale(0.55);
     filter: brightness(0.2) blur(2px);
     opacity: 0;
   }
@@ -2901,41 +3187,83 @@ button.card {
 }
 
 .reticle {
+  --rc: var(--hud-c);
   position: absolute;
-  inset: -6% -4%;
+  inset: -8% -5%;
   pointer-events: none;
   opacity: 0;
   background:
-    linear-gradient(#ff5a3a, #ff5a3a) top left / 22px 3px no-repeat,
-    linear-gradient(#ff5a3a, #ff5a3a) top left / 3px 22px no-repeat,
-    linear-gradient(#ff5a3a, #ff5a3a) top right / 22px 3px no-repeat,
-    linear-gradient(#ff5a3a, #ff5a3a) top right / 3px 22px no-repeat,
-    linear-gradient(#ff5a3a, #ff5a3a) bottom left / 22px 3px no-repeat,
-    linear-gradient(#ff5a3a, #ff5a3a) bottom left / 3px 22px no-repeat,
-    linear-gradient(#ff5a3a, #ff5a3a) bottom right / 22px 3px no-repeat,
-    linear-gradient(#ff5a3a, #ff5a3a) bottom right / 3px 22px no-repeat;
+    linear-gradient(var(--rc), var(--rc)) top left / 18px 2px no-repeat,
+    linear-gradient(var(--rc), var(--rc)) top left / 2px 18px no-repeat,
+    linear-gradient(var(--rc), var(--rc)) top right / 18px 2px no-repeat,
+    linear-gradient(var(--rc), var(--rc)) top right / 2px 18px no-repeat,
+    linear-gradient(var(--rc), var(--rc)) bottom left / 18px 2px no-repeat,
+    linear-gradient(var(--rc), var(--rc)) bottom left / 2px 18px no-repeat,
+    linear-gradient(var(--rc), var(--rc)) bottom right / 18px 2px no-repeat,
+    linear-gradient(var(--rc), var(--rc)) bottom right / 2px 18px no-repeat;
   transition: opacity 0.15s, inset 0.15s;
-  filter: drop-shadow(0 0 4px rgba(255, 90, 58, 0.8));
+  filter: drop-shadow(0 0 4px var(--rc));
 }
 
-.foe.selected .reticle {
-  opacity: 0.7;
+.reticle b,
+.reticle small {
+  position: absolute;
+  display: none;
+  font-family: var(--cond);
+  font-weight: 800;
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--rc);
+  white-space: nowrap;
+}
+
+.reticle b {
+  left: 5px;
+  top: 5px;
+}
+
+.reticle small {
+  right: 5px;
+  bottom: 5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.foe.tracked .reticle {
+  opacity: 0.85;
+}
+
+.foe.tracked .reticle b,
+.foe.tracked .reticle small {
+  display: block;
+}
+
+.foe.selected .reticle,
+.foe.aimed .reticle {
+  --rc: var(--lock-c);
 }
 
 .foe:hover .reticle,
 .foe.aimed .reticle {
   opacity: 1;
-  inset: -2% 0;
+  inset: -3% -1%;
 }
 
 .battle.aiming .foe:not(.down) .reticle {
+  --rc: var(--lock-c);
   opacity: 0.8;
   animation: reticle 0.9s ease-in-out infinite;
 }
 
+.cam-wide .foe .reticle {
+  opacity: 0;
+}
+
 @keyframes reticle {
   50% {
-    inset: -10% -8%;
+    inset: -12% -9%;
     opacity: 0.4;
   }
 }
@@ -3943,6 +4271,11 @@ body.busy .hand .card {
   padding: 12px 0 14px;
 }
 
+/* Turn banners run under the foes so the camera move and their bank-around stay in view. */
+.banner.short {
+  padding-top: 26vh;
+}
+
 .banner.short b {
   font-size: clamp(1.8rem, 5vw, 2.8rem);
 }
@@ -4868,11 +5201,12 @@ div.loot > span {
 }
 
 .shell.enter[data-screen="combat"] .ally {
-  animation: fly-in-left 0.9s cubic-bezier(0.2, 0.8, 0.3, 1);
+  animation: fly-in-low 0.9s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
-.shell.enter[data-screen="combat"] .foes {
-  animation: fly-in-right 0.9s cubic-bezier(0.2, 0.8, 0.3, 1);
+.shell.enter[data-screen="combat"] .foe {
+  animation: fly-in-far 1.1s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+  animation-delay: calc(0.15s + var(--slot) * 0.12s);
 }
 
 @keyframes enter {
@@ -4882,17 +5216,17 @@ div.loot > span {
   }
 }
 
-@keyframes fly-in-left {
+@keyframes fly-in-low {
   from {
     opacity: 0;
-    translate: -40vw 0;
+    transform: translateY(60%) scale(1.5);
   }
 }
 
-@keyframes fly-in-right {
+@keyframes fly-in-far {
   from {
     opacity: 0;
-    translate: 40vw 0;
+    transform: scale(0.25);
   }
 }
 
@@ -5016,53 +5350,40 @@ div.loot > span {
     height: 32px;
   }
 
-  .ally {
-    left: 1%;
-    width: 44vw;
-    top: 50%;
-  }
-
-  .foes {
-    left: 46%;
-    right: 1%;
-    top: 36px;
-    flex-direction: column;
-    justify-content: space-around;
-    gap: 0;
-  }
-
-  .stage.chase-enemy .ally {
-    left: auto;
-    right: 1%;
-  }
-
-  .stage.chase-enemy .foes {
-    left: 1%;
-    right: 46%;
-  }
-
-  .stage.chase-enemy .ally::before {
+  .threat-tag {
+    top: 34px;
     font-size: 0.66rem;
     padding: 2px 8px 3px;
   }
 
-  .foe,
-  .n2 .foe,
-  .n3 .foe {
-    width: 50vw;
-    margin-top: 0 !important;
+  .hud-tape {
+    display: none;
   }
 
-  .foe.boss {
-    width: 54vw;
+  .hud-cross {
+    width: 24px;
+    height: 24px;
   }
 
-  .n2 .foe .unit-art {
-    width: 82%;
+  .pilot {
+    left: 6px;
+    bottom: 6px;
+    width: min(42vw, 190px);
+    gap: 2px;
+    padding: 5px 8px 6px;
   }
 
-  .n3 .foe .unit-art {
-    width: 66%;
+  .pilot .nameplate small {
+    display: none;
+  }
+
+  .foe > .unit-hud {
+    width: clamp(96px, 100%, 170px);
+  }
+
+  .reticle b,
+  .reticle small {
+    font-size: 0.54rem;
   }
 
   .n3 .foe .nameplate small,
@@ -5440,6 +5761,10 @@ div.loot > span {
 }
 
 @media (max-width: 720px) and (orientation: portrait) {
+  .pilot {
+    bottom: 34%;
+  }
+
   .hangar-main {
     display: contents;
   }
@@ -5511,59 +5836,28 @@ div.loot > span {
     height: 36px;
   }
 
-  .ally {
-    left: 2%;
-    width: min(26vw, 250px);
-    top: 54%;
-    transform: translateY(-50%);
-  }
-
-  .foes {
-    left: 32%;
-    right: 2%;
-    top: 30px;
-    bottom: 0;
-    flex-direction: row;
-    justify-content: space-evenly;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .stage.chase-enemy .ally {
+  .contact-tag {
     left: auto;
-    right: 2%;
+    right: 8px;
+    transform: none;
   }
 
-  .stage.chase-enemy .foes {
-    left: 2%;
-    right: 32%;
+  .threat-tag {
+    top: 6px;
   }
 
-  .foe,
-  .n2 .foe,
-  .n3 .foe {
-    width: min(24vw, 230px);
-  }
-
-  .n2 .foe:nth-child(2) {
-    margin-top: 22px !important;
-  }
-
-  .foe.boss {
-    width: min(30vw, 270px);
-  }
-
-  .n2 .foe .unit-art,
-  .n3 .foe .unit-art {
-    width: 88%;
+  .pilot {
+    left: 8px;
+    bottom: 6px;
+    width: min(24vw, 190px);
   }
 
   .nameplate small {
     display: none;
   }
 
-  .unit-hud {
-    width: min(100%, 150px);
+  .foe > .unit-hud {
+    width: clamp(90px, 100%, 150px);
   }
 
   .intent-ico {

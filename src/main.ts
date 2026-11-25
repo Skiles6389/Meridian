@@ -36,11 +36,12 @@ import {
   takeRewardRelic,
 } from "./game/run";
 import type { JetId, RunState } from "./game/types";
+import type { CamShot } from "./ui/camera";
 import { shotStyle } from "./ui/art";
 import {
   aim,
   banner,
-  chase,
+  camera,
   flipHand,
   handRects,
   initFx,
@@ -80,6 +81,7 @@ const app: AppState = {
   showLog: false,
   frozen: null,
   pickArm: null,
+  cam: "close",
 };
 
 const root = document.querySelector<HTMLElement>("#app");
@@ -118,7 +120,14 @@ function persist() {
   saveRun(app.run);
 }
 
+function moveCamera(shot: CamShot): Promise<void> {
+  app.cam = shot;
+  return camera(shot);
+}
+
 function draw() {
+  if (app.run?.screen !== "combat" && !app.frozen) app.cam = "close";
+  document.documentElement.dataset.cam = app.cam;
   setScene(sceneKey(app));
   syncAudio();
   const scroller = root!.querySelector<HTMLElement>("[data-scroll]");
@@ -287,9 +296,12 @@ async function combatAction(perform: () => ActionResult | void, opts: ActionOpts
     const ctx = { playerShot: opts.shot, bars: barsOf(pre), pendingDown };
     if (opts.turn) {
       const timeline = splitTurnEvents(events);
-      if (enemiesTakeLead(timeline.enemy)) await Promise.all([banner("Enemy turn", "", "short enemy"), chase("enemy")]);
+      if (enemiesTakeLead(timeline.enemy)) await Promise.all([banner("Enemy turn", "", "short enemy"), moveCamera("wide")]);
       await playEvents(timeline.enemy, ctx);
-      if (timeline.player.length) await chase("player");
+      if (timeline.player.length) {
+        await wait(380);
+        await moveCamera("close");
+      }
       await playEvents(timeline.player, ctx);
     } else {
       await playEvents(events, ctx);

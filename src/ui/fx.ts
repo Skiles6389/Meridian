@@ -1,5 +1,5 @@
 import { sfx } from "../audio";
-import type { ChaseLead } from "../game/chase";
+import type { CamShot } from "./camera";
 import { PLAYER, type CombatFx } from "../game/combat";
 
 let layer: HTMLElement;
@@ -61,39 +61,55 @@ function artEl(who: number): HTMLElement | null {
 }
 
 function center(who: number): { x: number; y: number } | null {
-  const el = artEl(who)?.querySelector<HTMLElement>(".jet") ?? artEl(who);
+  const el = artEl(who);
   if (!el) return null;
   const r = el.getBoundingClientRect();
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
+function wideCam(): boolean {
+  return !!root.querySelector(".battle.cam-wide");
+}
+
+/**
+ * Where shots leave an airframe. The player's jet is seen from behind, so its fire leaves the
+ * spine and heads into the frame; enemies turned in to attack fire from the nose of the
+ * front-quarter view.
+ */
 function muzzle(who: number): { x: number; y: number } | null {
-  const el = artEl(who)?.querySelector<HTMLElement>(".jet") ?? artEl(who);
+  const el = artEl(who);
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  return { x: r.left + r.width * 0.82, y: r.top + r.height * 0.55 };
+  if (who === PLAYER) return { x: r.left + r.width / 2, y: r.top + r.height * 0.38 };
+  if (!wideCam()) return { x: r.left + r.width / 2, y: r.top + r.height * 0.5 };
+  const right = !!el.querySelector(".cj-front.flip");
+  return { x: r.left + r.width * (right ? 0.8 : 0.2), y: r.top + r.height * 0.6 };
 }
 
-/** Which way `who` sits from `other` on screen: 1 when to its right, -1 when to its left. */
-function sideOf(who: number, other: number): number {
-  const a = center(who);
-  const b = center(other);
-  if (!a || !b) return who === PLAYER ? -1 : 1;
-  return a.x >= b.x ? 1 : -1;
-}
-
-function opponentOf(who: number): number {
-  if (who !== PLAYER) return PLAYER;
-  const foe = root.querySelector<HTMLElement>(".foe:not(.down)");
-  return foe ? Number(foe.dataset.who) : PLAYER;
+/** How near the camera an airframe sits, from its drawn size: about 1 for the player's jet up close. */
+function depth(who: number): number {
+  const el = artEl(who);
+  const w = el?.getBoundingClientRect().width ?? 0;
+  const ref = Math.min(560, Math.max(260, window.innerWidth * 0.42));
+  return Math.max(0.3, Math.min(1.5, w / ref || 0.6));
 }
 
 /* --------------------------------------------------------------- pieces */
 
+const recentFloats = new Map<number, number[]>();
+
 export function floatText(who: number, text: string, cls: string) {
   const c = center(who);
   if (!c) return;
-  const el = spawn(`float ${cls}`, c.x + (Math.random() * 60 - 30), c.y - 30 - Math.random() * 20, `<span>${text}</span>`);
+  const now = performance.now();
+  const recent = (recentFloats.get(who) ?? []).filter((t) => now - t < 650);
+  const lane = recent.length % 4;
+  recent.push(now);
+  recentFloats.set(who, recent);
+  const side = lane === 0 ? 0 : lane % 2 ? 1 : -1;
+  const x = c.x + side * 54 + (Math.random() * 24 - 12);
+  const y = c.y - 30 - (lane >= 2 ? 28 : 0) - Math.random() * 10;
+  const el = spawn(`float ${cls}`, x, y, `<span>${text}</span>`);
   el.style.setProperty("--dx", `${(Math.random() * 2 - 1) * 34}px`);
   el.style.setProperty("--rot", `${(Math.random() * 2 - 1) * 7}deg`);
   drop(el, 1500);
@@ -153,14 +169,19 @@ function bezier(a: Pt, c: Pt, b: Pt, t: number): Pt {
   return { x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y };
 }
 
-/** Flies a missile along a lofted curve, laying a smoke trail behind it as it goes. */
-function missile(a: Pt, b: Pt, heavy: boolean): Promise<void> {
-  const lift = heavy ? -140 : -60 - Math.random() * 60;
-  const c = { x: (a.x + b.x) / 2, y: Math.min(a.y, b.y) + lift };
+/**
+ * Flies a missile along a lofted curve, laying a smoke trail behind it as it goes. `ka` and `kb`
+ * scale the round at each end, so a shot heading into the frame shrinks and one coming at the
+ * camera swells.
+ */
+function missile(a: Pt, b: Pt, heavy: boolean, ka = 1, kb = 1): Promise<void> {
+  const side = (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 70);
+  const lift = heavy ? -110 : -40 - Math.random() * 50;
+  const c = { x: (a.x + b.x) / 2 + side, y: Math.min(a.y, b.y) + lift };
   const dur = (heavy ? 560 : 420) * speed;
   const start = { x: a.x, y: a.y + 6 };
-  muzzleFlash(start, (Math.atan2(c.y - a.y, c.x - a.x) * 180) / Math.PI, heavy ? 1.4 : 1);
-  puff(start, "puff-launch", heavy ? 34 : 24, 700);
+  muzzleFlash(start, (Math.atan2(c.y - a.y, c.x - a.x) * 180) / Math.PI, (heavy ? 1.4 : 1) * ka);
+  puff(start, "puff-launch", (heavy ? 34 : 24) * ka, 700);
   const head = spawn(heavy ? "missile heavy" : "missile", 0, 0, "<i></i>");
   const gap = heavy ? 7 : 9;
   return new Promise((resolve) => {
@@ -169,13 +190,15 @@ function missile(a: Pt, b: Pt, heavy: boolean): Promise<void> {
     let lastPuff = start;
     const frame = (now: number) => {
       const k = Math.min(1, (now - t0) / dur);
-      const p = bezier(start, c, b, k ** 1.55);
+      const e = k ** 1.55;
+      const p = bezier(start, c, b, e);
+      const scale = ka + (kb - ka) * e;
       const ang = Math.atan2(p.y - last.y, p.x - last.x);
-      head.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) rotate(${ang.toFixed(3)}rad)`;
+      head.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) rotate(${ang.toFixed(3)}rad) scale(${scale.toFixed(3)})`;
       const run = Math.hypot(p.x - lastPuff.x, p.y - lastPuff.y);
       for (let d = gap; d <= run; d += gap) {
         const f = d / run;
-        puff({ x: lastPuff.x + (p.x - lastPuff.x) * f, y: lastPuff.y + (p.y - lastPuff.y) * f }, heavy ? "puff-heavy" : "puff-trail", heavy ? 20 : 15, heavy ? 1300 : 1100);
+        puff({ x: lastPuff.x + (p.x - lastPuff.x) * f, y: lastPuff.y + (p.y - lastPuff.y) * f }, heavy ? "puff-heavy" : "puff-trail", (heavy ? 20 : 15) * scale, heavy ? 1300 : 1100);
       }
       if (run >= gap) lastPuff = { x: lastPuff.x + ((p.x - lastPuff.x) * Math.floor(run / gap) * gap) / run, y: lastPuff.y + ((p.y - lastPuff.y) * Math.floor(run / gap) * gap) / run };
       last = p;
@@ -189,20 +212,21 @@ function missile(a: Pt, b: Pt, heavy: boolean): Promise<void> {
   });
 }
 
-async function tracer(a: { x: number; y: number }, b: { x: number; y: number }) {
+async function tracer(a: { x: number; y: number }, b: { x: number; y: number }, ka = 1, kb = 1) {
   const angle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
   const dur = 190 * speed;
   const rounds = 4;
   let last: Promise<unknown> = Promise.resolve();
   for (let i = 0; i < rounds; i++) {
-    const jy = (Math.random() * 2 - 1) * 10;
-    window.setTimeout(() => muzzleFlash(a, angle, 0.8 + Math.random() * 0.4), i * 45 * speed);
+    const jx = (Math.random() * 2 - 1) * 14 * kb;
+    const jy = (Math.random() * 2 - 1) * 10 * kb;
+    window.setTimeout(() => muzzleFlash(a, angle, (0.8 + Math.random() * 0.4) * ka), i * 45 * speed);
     const el = spawn("tracer", a.x, a.y);
-    el.style.transform = `rotate(${angle}deg)`;
+    el.style.transform = `rotate(${angle}deg) scale(${ka})`;
     const anim = el.animate(
       [
-        { transform: `translate(0,0) rotate(${angle}deg)`, opacity: 1 },
-        { transform: `translate(${b.x - a.x}px, ${b.y - a.y + jy}px) rotate(${angle}deg)`, opacity: 1 },
+        { transform: `translate(0,0) rotate(${angle}deg) scale(${ka.toFixed(2)})`, opacity: 1 },
+        { transform: `translate(${b.x - a.x + jx}px, ${b.y - a.y + jy}px) rotate(${angle}deg) scale(${kb.toFixed(2)})`, opacity: 1 },
       ],
       { duration: dur, delay: i * 45 * speed, easing: "linear", fill: "forwards" },
     );
@@ -241,40 +265,45 @@ export async function shot(from: number, to: number, style: ShotStyle) {
     await wait(80);
     return;
   }
+  const ka = depth(from);
+  const kb = depth(to);
   if (style === "tracer") {
     sfx("cannon");
-    await tracer(a, b);
+    await tracer(a, b, ka, kb);
   } else if (style === "zap") {
     sfx("zap");
     await zap(a, b);
   } else {
     sfx(style === "heavy" ? "heavy" : "missile");
-    await missile(a, b, style === "heavy");
+    await missile(a, b, style === "heavy", ka, kb);
   }
 }
 
-function recoil(who: number, from: number, hard: boolean) {
+/**
+ * Knocks an airframe about when a hit lands. Hits on the player's jet come from ahead, so it is
+ * shoved toward the camera and rolls; a foe ahead is punched away and yaws.
+ */
+function recoil(who: number, hard: boolean) {
   const art = artEl(who);
   if (!art) return;
   hitFlash(who, hard);
   if (reduced()) return;
-  const dir = sideOf(who, from);
-  art.animate(
-    [
-      { transform: "translate(0,0)" },
-      { transform: `translate(${dir * (hard ? 22 : 12)}px, ${hard ? -4 : -2}px) rotate(${dir * (hard ? 4 : 2)}deg)` },
-      { transform: "translate(0,0)" },
-    ],
-    { duration: 320, easing: "cubic-bezier(.2,.8,.3,1)" },
-  );
+  const roll = (Math.random() < 0.5 ? -1 : 1) * (hard ? 7 : 4);
+  const kick = who === PLAYER ? `translate(${roll * 2}px, ${hard ? 16 : 9}px) rotate(${roll}deg) scale(1.03)` : `translate(${roll * 1.5}px, ${hard ? -12 : -6}px) rotate(${roll}deg) scale(0.95)`;
+  art.animate([{ transform: "none" }, { transform: kick }, { transform: "none" }], { duration: 340, easing: "cubic-bezier(.2,.8,.3,1)" });
 }
 
 /** A one-frame white pop on the airframe; the player's jet flashes red instead. */
 function hitFlash(who: number, hard: boolean) {
-  const jet = artEl(who)?.querySelector<HTMLElement>(".jet");
-  if (!jet) return;
   const peak = who === PLAYER ? "brightness(1.2) sepia(1) saturate(8) hue-rotate(-42deg)" : `brightness(${hard ? 3.4 : 2.6}) saturate(0)`;
-  jet.animate([{ filter: "none" }, { filter: peak, offset: 0.12 }, { filter: "brightness(1.25)", offset: 0.4 }, { filter: "none" }], { duration: hard ? 300 : 220, easing: "ease-out" });
+  for (const jet of artEl(who)?.querySelectorAll<HTMLElement>(".cj img") ?? []) {
+    jet.animate([{ filter: "none" }, { filter: peak, offset: 0.12 }, { filter: "brightness(1.25)", offset: 0.4 }, { filter: "none" }], { duration: hard ? 300 : 220, easing: "ease-out" });
+  }
+}
+
+/** Rough on-screen size of an airframe, for scaling explosions to how far away it is. */
+function blastScale(who: number): number {
+  return Math.max(0.45, Math.min(1.3, depth(who) * 1.15));
 }
 
 export function shake(power: number) {
@@ -295,52 +324,56 @@ function vignette(cls: string) {
   drop(el, 700);
 }
 
+/** An attack run: the foe dives in toward the camera and the player's jet, then pulls off. */
 export function lunge(who: number) {
   const art = artEl(who);
-  if (!art || reduced()) return;
-  const dir = -sideOf(who, opponentOf(who));
+  const me = center(who);
+  const target = center(PLAYER);
+  if (!art || !me || !target || reduced()) return;
+  const dx = (target.x - me.x) * 0.18;
+  const dy = (target.y - me.y) * 0.16;
+  const roll = me.x < target.x ? 12 : -12;
   art.animate(
-    [{ transform: "translateX(0)" }, { transform: `translateX(${dir * 46}px) translateY(-6px)` }, { transform: "translateX(0)" }],
-    { duration: 420 * speed, easing: "cubic-bezier(.3,.7,.3,1)" },
+    [
+      { transform: "none" },
+      { transform: `translate(${dx.toFixed(0)}px, ${dy.toFixed(0)}px) rotate(${roll}deg) scale(1.28)`, offset: 0.45 },
+      { transform: `translate(${(dx * 0.6).toFixed(0)}px, ${(dy * 0.5).toFixed(0)}px) rotate(${roll * 0.5}deg) scale(1.16)`, offset: 0.7 },
+      { transform: "none" },
+    ],
+    { duration: 900 * speed, easing: "cubic-bezier(.3,.7,.3,1)" },
+  );
+}
+
+/** A hard jink to one side, used when a shot is dodged. */
+function jink(who: number) {
+  const art = artEl(who);
+  if (!art || reduced()) return;
+  const dir = Math.random() < 0.5 ? -1 : 1;
+  const far = who === PLAYER ? 70 : 34;
+  art.animate(
+    [{ transform: "none" }, { transform: `translate(${dir * far}px, -10px) rotate(${dir * 24}deg)` }, { transform: "none" }],
+    { duration: 460, easing: "cubic-bezier(.25,.8,.3,1)" },
   );
 }
 
 /**
- * Swaps the two sides of the tail chase so `lead` (the side about to attack) flies behind.
- * Every unit glides from its old place to its new one; jets pulling ahead climb over, the
- * ones falling back dip under, so the paths cross without overlapping.
+ * Moves the chase camera. "wide" pulls back and widens the frame while enemies attack, and the
+ * foes bank around to face the player; "close" pushes back in behind the jet for the player's turn.
+ * The stylesheet animates the move; this waits for it to finish.
  */
-export async function chase(lead: ChaseLead): Promise<void> {
-  const stage = root.querySelector<HTMLElement>(".stage");
-  if (!stage || stage.classList.contains(`chase-${lead}`)) return;
-  const units = [...stage.querySelectorAll<HTMLElement>(".ally, .foe:not(.down)")];
-  const before = new Map(units.map((el) => [el, el.getBoundingClientRect()]));
-  stage.classList.remove("chase-player", "chase-enemy");
-  stage.classList.add(`chase-${lead}`);
-  if (reduced()) return;
+export async function camera(shot: CamShot): Promise<void> {
+  const battle = root.querySelector<HTMLElement>(".battle");
+  document.documentElement.dataset.cam = shot;
+  if (!battle || battle.classList.contains(`cam-${shot}`)) return;
+  battle.classList.remove("cam-close", "cam-wide");
+  battle.classList.add(`cam-${shot}`, "cam-moving");
+  if (reduced()) {
+    battle.classList.remove("cam-moving");
+    return;
+  }
   sfx("whoosh");
-  stage.classList.add("swapping");
-  const duration = 780 * speed;
-  const runs = units.map((el, index) => {
-    const a = before.get(el)!;
-    const b = el.getBoundingClientRect();
-    const dx = a.left - b.left;
-    const dy = a.top - b.top;
-    const ahead = dx < 0;
-    el.classList.add(ahead ? "surging" : "braking");
-    const lift = ahead ? -54 : 30 + index * 8;
-    return el.animate(
-      [
-        { translate: `${dx}px ${dy}px`, rotate: "0deg" },
-        { translate: `${dx * 0.5}px ${dy * 0.5 + lift}px`, rotate: ahead ? "-6deg" : "5deg", offset: 0.5 },
-        { translate: "0px 0px", rotate: "0deg" },
-      ],
-      { duration, delay: ahead ? 0 : index * 40 * speed, easing: "cubic-bezier(.5,.05,.3,1)", fill: "backwards" },
-    );
-  });
-  await Promise.all(runs.map((run) => run.finished.catch(() => undefined)));
-  stage.classList.remove("swapping");
-  for (const el of units) el.classList.remove("surging", "braking");
+  await wait(shot === "wide" ? 950 : 800);
+  battle.classList.remove("cam-moving");
 }
 
 function flashScreen() {
@@ -393,17 +426,19 @@ function smokeFollow(who: number, ms: number) {
 
 async function shootDown(who: number, pendingDown: Set<number>) {
   const c = center(who);
+  const k = blastScale(who);
   sfx("explode");
   if (c) {
     flashScreen();
-    burst(c.x, c.y, 130, "big");
+    burst(c.x, c.y, 130 * k, "big");
     const ring = spawn("shock", c.x, c.y);
+    ring.style.setProperty("--k", k.toFixed(2));
     drop(ring, 700);
     debris(c, 14);
-    window.setTimeout(() => burst(c.x + 40, c.y - 18, 70, "boom"), 160);
+    window.setTimeout(() => burst(c.x + 40 * k, c.y - 18 * k, 70 * k, "boom"), 160);
     window.setTimeout(() => {
       const p = center(who);
-      if (p) burst(p.x - 20, p.y + 10, 60, "boom");
+      if (p) burst(p.x - 20 * k, p.y + 10 * k, 60 * k, "boom");
       sfx("hit");
     }, 520);
   }
@@ -507,11 +542,12 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       await shot(event.from, event.who, style);
       const c = center(event.who);
       const heavy = event.amount >= 12 || style === "heavy";
-      if (c) burst(c.x + (Math.random() * 30 - 15), c.y + (Math.random() * 20 - 10), heavy ? 70 : 40, heavy ? "boom" : "hit");
+      const k = blastScale(event.who);
+      if (c) burst(c.x + (Math.random() * 30 - 15) * k, c.y + (Math.random() * 20 - 10) * k, (heavy ? 70 : 40) * k, heavy ? "boom" : "hit");
       ctx.bars.set(event.who, { hp: event.hp, shield: event.shield });
       setBar(event.who, event.hp, event.shield);
       if (event.amount > 0) {
-        recoil(event.who, event.from, heavy);
+        recoil(event.who, heavy);
         sfx(heavy ? "hitBig" : "hit");
         const crit = event.amount >= 15 ? " dmg-crit" : "";
         floatText(event.who, String(event.amount), event.who === PLAYER ? `dmg dmg-player${crit}` : heavy ? `dmg dmg-big${crit}` : "dmg");
@@ -527,18 +563,18 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       if (event.blocked > 0 && event.amount > 0) pulseShield(event.who);
       await wait(style === "tracer" ? 70 : 110);
     } else if (event.t === "evade") {
-      await shot(event.from, event.who, "missile");
+      const dodge = shot(event.from, event.who, "missile");
+      window.setTimeout(() => jink(event.who), 180 * speed);
+      await dodge;
       floatText(event.who, "Evaded", "evade");
       sfx("evade");
-      const art = artEl(event.who);
-      art?.animate([{ transform: "translateY(0)" }, { transform: "translateY(-34px) rotate(-8deg)" }, { transform: "translateY(0)" }], { duration: 420, easing: "ease-out" });
       await wait(120);
     } else if (event.t === "burn") {
       ctx.bars.set(event.who, { hp: event.hp, shield: ctx.bars.get(event.who)?.shield ?? 0 });
       setBar(event.who, event.hp, ctx.bars.get(event.who)?.shield ?? 0);
       if (event.amount > 0) floatText(event.who, String(event.amount), "dmg dmg-burn");
       const c = center(event.who);
-      if (c) burst(c.x, c.y, 34, "hit");
+      if (c) burst(c.x, c.y, 34 * blastScale(event.who), "hit");
       if (event.who === PLAYER && event.amount > 0) vignette("burn");
       await wait(220);
     } else if (event.t === "shield") {
@@ -567,7 +603,7 @@ export async function playEvents(events: CombatFx[], ctx: PlayContext) {
       unit?.classList.add("acting");
       floatText(event.uid, event.name, "move-name");
       if (event.kind === "attack") lunge(event.uid);
-      await wait(event.kind === "attack" ? 260 : 300);
+      await wait(event.kind === "attack" ? 380 : 300);
       window.setTimeout(() => unit?.classList.remove("acting"), 700);
     } else if (event.t === "down") {
       await shootDown(event.who, ctx.pendingDown);

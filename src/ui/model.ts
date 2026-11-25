@@ -1,4 +1,5 @@
 import type { JetId, Meta, RunState } from "../game/types";
+import type { CamShot } from "./camera";
 
 export interface AppState {
   view: "title" | "how" | "hangar" | "records" | "run";
@@ -22,4 +23,6 @@ export interface AppState {
   frozen: RunState | null;
   /** On phones, the reward or shop card tapped once and waiting for a confirming tap. */
   pickArm: string | null;
+  /** Battle camera: close behind the jet on the player's turn, pulled back while enemies attack. */
+  cam: CamShot;
 }

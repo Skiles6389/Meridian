@@ -1,12 +1,9 @@
 import type { CombatFx } from "./combat";
 
-/** Who is attacking, and so flying behind the other side in the tail chase. */
-export type ChaseLead = "player" | "enemy";
-
 export interface TurnTimeline {
-  /** Events from the enemy phase, played with the enemies behind the player. */
+  /** Events from the enemy phase, played with the chase camera pulled back wide. */
   enemy: CombatFx[];
-  /** Events from the start of the player's next turn onward, played with the player behind. */
+  /** Events from the start of the player's next turn onward, played close behind the player's jet. */
   player: CombatFx[];
 }
 
@@ -17,7 +14,7 @@ export function splitTurnEvents(events: CombatFx[]): TurnTimeline {
   return { enemy: events.slice(0, at), player: events.slice(at) };
 }
 
-/** Enemies swing behind the player only when at least one of them acts. */
+/** The camera pulls back for the enemy phase only when at least one enemy acts. */
 export function enemiesTakeLead(enemyEvents: CombatFx[]): boolean {
   return enemyEvents.some((event) => event.t === "move");
 }

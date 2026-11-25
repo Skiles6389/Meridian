@@ -11,7 +11,8 @@ import { nodeById } from "../game/map";
 import { getRelic } from "../game/relics";
 import { choiceAvailable, reachable, removalCost, repairOf } from "../game/run";
 import type { CardDef, Fighter, MapNode, NodeType, Plan, RunState, Status } from "../game/types";
-import { ACT_SCENE, SCENE_ART, cardArt, eventArt, jetArt } from "./art";
+import { ACT_SCENE, CHASE_SCENE, SCENE_ART, cardArt, chaseArt, chaseAspect, eventArt, jetArt } from "./art";
+import { allySpot, facesRight, foeSpots, type CamShape, type Spot } from "./camera";
 import { icon, nodeIcon, relicIcon } from "./icons";
 import type { AppState } from "./model";
 
@@ -52,6 +53,7 @@ export function sceneKey(app: AppState): string {
   const run = app.run;
   if (run.screen === "shop" || (run.screen === "remove" && run.remove?.next === "shop")) return "shop";
   if (run.screen === "map") return `chart-${run.act}`;
+  if (run.screen === "combat" || app.frozen) return CHASE_SCENE[run.act];
   return ACT_SCENE[run.act];
 }
 
@@ -552,7 +554,21 @@ function intentHtml(plan: Plan): string {
     </div>`;
 }
 
-function foeHtml(run: RunState, enemy: Fighter, index: number, app: AppState): string {
+export function camShape(): CamShape {
+  return phoneShape() ?? "desk";
+}
+
+function spotVars(prefix: string, spot: Spot): string {
+  return `--${prefix}x:${spot.x};--${prefix}y:${spot.y};--${prefix}s:${spot.s}`;
+}
+
+/** The foe the HUD tracks: the one the player marked, or else the lead live contact. */
+function trackedUid(run: RunState, app: AppState): number | null {
+  const living = run.combat!.enemies.filter((enemy) => enemy.hp > 0);
+  return living.find((enemy) => enemy.uid === app.targetUid)?.uid ?? living[0]?.uid ?? null;
+}
+
+function foeHtml(run: RunState, enemy: Fighter, index: number, app: AppState, close: Spot, wide: Spot, tracked: boolean): string {
   const def = getEnemy(enemy.defId);
   let plan: Plan = { kind: "down", title: "Down", damage: 0, hits: 0, perHit: 0, uneven: false, shield: 0, tags: [] };
   if (enemy.hp > 0) {
@@ -564,10 +580,16 @@ function foeHtml(run: RunState, enemy: Fighter, index: number, app: AppState): s
   }
   const selected = app.targetUid === enemy.uid;
   const down = enemy.hp <= 0;
+  const range = (0.8 + (62 - close.y) * 0.06 + index * 0.3).toFixed(1);
+  const box = Math.min(chaseAspect(enemy.silhouette, "rear"), chaseAspect(enemy.silhouette, "front")).toFixed(3);
   return `
-    <div class="foe ${selected ? "selected" : ""} ${down ? "down" : ""} ${enemy.boss ? "boss" : ""} ${enemy.elite ? "elite" : ""}" data-act="target" data-arg="${enemy.uid}" data-who="${enemy.uid}" style="--slot:${index}">
+    <div class="foe ${selected ? "selected" : ""} ${tracked ? "tracked" : ""} ${down ? "down" : ""} ${enemy.boss ? "boss" : ""} ${enemy.elite ? "elite" : ""}" data-act="target" data-arg="${enemy.uid}" data-who="${enemy.uid}" style="--slot:${index};--box:${box};${spotVars("c", close)};${spotVars("w", wide)}">
       ${down ? "" : intentHtml(plan)}
-      <div class="unit-art">${jetArt(enemy.silhouette, { livery: def.livery })}<div class="reticle"></div></div>
+      <div class="unit-art">
+        ${chaseArt(enemy.silhouette, "rear", { livery: def.livery })}
+        ${chaseArt(enemy.silhouette, "front", { livery: def.livery, flip: facesRight(wide) })}
+        <div class="reticle"><b>${selected ? "Lock" : "Tgt"}</b><small>${range} nm</small></div>
+      </div>
       <div class="unit-hud">
         <div class="nameplate"><b>${esc(enemy.name)}</b><small>${esc(enemy.epithet)}</small></div>
         ${hpBar(enemy.uid, enemy.hp, enemy.maxHp, enemy.shield)}
@@ -639,12 +661,32 @@ function previewHint(run: RunState, index: number, playable: boolean, targetUid:
   return "Tap the card again to play";
 }
 
+const HUD_ALT: Record<number, number> = { 1: 6400, 2: 14200, 3: 38600 };
+
+/** A light head-up display drawn over the chase view: gun cross, pitch ladder, speed and altitude. */
+function camHud(run: RunState): string {
+  const turn = run.combat!.turn;
+  const alt = HUD_ALT[run.act] + ((turn * 370) % 900) - 450;
+  const mach = (0.82 + ((turn * 7) % 9) / 100).toFixed(2);
+  return `<div class="cam-hud" aria-hidden="true">
+      <i class="hud-cross"></i>
+      <i class="hud-ladder"></i>
+      <span class="hud-tape spd"><small>M</small>${mach}</span>
+      <span class="hud-tape alt"><small>ALT</small>${alt.toLocaleString("en-US").replace(",", " ")}</span>
+    </div>`;
+}
+
 function battle(app: AppState): string {
   const frozen = !!app.frozen;
   const run = app.frozen ?? app.run!;
   const combat = run.combat!;
   const living = combat.enemies.filter((enemy) => enemy.hp > 0);
-  const foes = combat.enemies.map((enemy, index) => foeHtml(run, enemy, index, app)).join("");
+  const shape = camShape();
+  const bosses = combat.enemies.map((enemy) => enemy.boss !== "");
+  const closeSpots = foeSpots(bosses, shape, "close");
+  const wideSpots = foeSpots(bosses, shape, "wide");
+  const tracked = trackedUid(run, app);
+  const foes = combat.enemies.map((enemy, index) => foeHtml(run, enemy, index, app, closeSpots[index], wideSpots[index], enemy.uid === tracked)).join("");
   const layout = handLayout(combat.hand.length);
   const hand = frozen
     ? ""
@@ -691,19 +733,21 @@ function battle(app: AppState): string {
   }
   const vars = `--cw:${layout.cw}px;--ch:${layout.ch}px${layout.trayH ? `;--tray-h:${layout.trayH}px` : ""}`;
   return `
-    <section class="battle n${combat.enemies.length} ${frozen ? "frozen" : ""} ${needsTarget ? "aiming" : ""}" style="${vars}">
-      <div class="stage chase-player">
+    <section class="battle n${combat.enemies.length} cam-${app.cam} ${frozen ? "frozen" : ""} ${needsTarget ? "aiming" : ""}" style="${vars}">
+      <div class="stage">
+        ${camHud(run)}
         <div class="contact-tag"><span>${esc(combat.encounterName)}</span><b>Turn ${combat.turn}</b></div>
-        <div class="ally" data-who="-1">
-          <div class="unit-art">${jetArt(jet.silhouette, { cls: "player" })}</div>
-          <div class="unit-hud">
-            <div class="nameplate"><b>${esc(jet.callsign)}</b><small>${esc(jet.code)} ${esc(jet.name)}</small></div>
-            ${hpBar(-1, run.hp, run.maxHp, combat.player.shield, "player")}
-            ${statusRow(combat.player.status)}
-            ${powers ? `<div class="power-row">${powers}</div>` : ""}
-          </div>
-        </div>
         <div class="foes">${foes}</div>
+        <div class="ally" data-who="-1" style="${spotVars("c", allySpot(shape, "close"))};${spotVars("w", allySpot(shape, "wide"))}">
+          <div class="unit-art">${chaseArt(jet.silhouette, "rear", { cls: "player" })}</div>
+        </div>
+        <div class="pilot">
+          <div class="nameplate"><b>${esc(jet.callsign)}</b><small>${esc(jet.code)} ${esc(jet.name)}</small></div>
+          ${hpBar(-1, run.hp, run.maxHp, combat.player.shield, "player")}
+          ${statusRow(combat.player.status)}
+          ${powers ? `<div class="power-row">${powers}</div>` : ""}
+        </div>
+        <div class="threat-tag">Bandits inbound</div>
       </div>
       <div class="tray">
         <div class="tray-left">
