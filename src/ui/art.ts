@@ -2,6 +2,7 @@ import chaseMeta from "../assets/art/chase.json";
 import jetMeta from "../assets/art/jets.json";
 import type { ActId, Livery, SilhouetteId } from "../game/types";
 import { anchorsOf, type StoreKind, type Xy } from "./anchors";
+import { gunPort, hungStore } from "./stores";
 
 const jetFiles = import.meta.glob("../assets/art/jets/*.webp", { eager: true, import: "default" }) as Record<string, string>;
 const cardFiles = import.meta.glob("../assets/art/cards/*.webp", { eager: true, import: "default" }) as Record<string, string>;
@@ -81,22 +82,8 @@ export function chaseAspect(id: SilhouetteId, view: ChaseView): number {
 
 const pct = (n: number) => `${n.toFixed(1)}%`;
 
-/** A missile seen from dead astern, hanging under its pylon: tail fins in an X around the motor nozzle. */
-function sternStore(kind: StoreKind): string {
-  if (kind === "bay") {
-    return `<svg viewBox="0 0 20 30"><g class="door"><path d="M3 0h14l-1.5 4.5h-11z" fill="#07090d"/><path d="M4 1 .5 15h4L7 3z" fill="#b4bdc9" stroke="#0d1117" stroke-width="1.3" stroke-linejoin="round"/><path d="M16 1l3.5 14h-4L13 3z" fill="#8792a1" stroke="#0d1117" stroke-width="1.3" stroke-linejoin="round"/></g></svg>`;
-  }
-  const pylon = `<path class="pyl" d="M7 0h6l-1.2 9H8.2z" fill="#56606e" stroke="#0d1117" stroke-width="1.3" stroke-linejoin="round"/>`;
-  if (kind === "pod") {
-    const tubes = [[10, 17], [6.4, 15], [13.6, 15], [6.4, 19.6], [13.6, 19.6], [10, 13], [10, 21.6]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.25" fill="#0d1117"/>`).join("");
-    return `<svg viewBox="0 0 20 30">${pylon}<g class="msl"><circle cx="10" cy="17.3" r="7.2" fill="#6d7868" stroke="#0d1117" stroke-width="1.5"/><path d="M4 21a7.2 7.2 0 0 0 12 0 9 9 0 0 1-12 0z" fill="#434c42"/><path d="M4.6 12.6a7.2 7.2 0 0 1 6-2.4" fill="none" stroke="#d9f4ff" stroke-width="1.1" stroke-linecap="round"/>${tubes}</g></svg>`;
-  }
-  const r = kind === "agm" ? 5.2 : 3.9;
-  const f = kind === "agm" ? 8.6 : 7.6;
-  const cy = 9.5 + r + 1.2;
-  const fins = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, y]) => `M10 ${cy}L${10 + x * f} ${cy + y * f}`).join("");
-  return `<svg viewBox="0 0 20 30">${pylon}<g class="msl"><path d="${fins}" stroke="#0d1117" stroke-width="3.2" stroke-linecap="round"/><path d="${fins}" stroke="#aab6c6" stroke-width="1.3" stroke-linecap="round"/><circle cx="10" cy="${cy}" r="${r}" fill="${kind === "agm" ? "#c9d0d8" : "#e9edf2"}" stroke="#0d1117" stroke-width="1.4"/><path d="M${10 - r * 0.86} ${cy + r * 0.5}a${r} ${r} 0 0 0 ${r * 1.72} 0 ${r * 1.5} ${r * 1.5} 0 0 1 ${-r * 1.72} 0z" fill="#8b97a8"/><circle cx="10" cy="${cy}" r="${r * 0.42}" fill="#161a21"/><path d="M${10 - r * 0.8} ${cy - r * 0.55}a${r} ${r} 0 0 1 ${r * 1.1} ${-r * 0.42}" fill="none" stroke="#d9f4ff" stroke-width="1" stroke-linecap="round"/></g></svg>`;
-}
+/** The doors of an internal bay seen from astern: shut and invisible until a weapon comes out. */
+const BAY_STERN = `<svg viewBox="0 0 20 30"><g class="door"><path d="M3 0h14l-1.5 4.5h-11z" fill="#07090d"/><path d="M4 1 .5 15h4L7 3z" fill="#b4bdc9" stroke="#0d1117" stroke-width="1.3" stroke-linejoin="round"/><path d="M16 1l3.5 14h-4L13 3z" fill="#8792a1" stroke="#0d1117" stroke-width="1.3" stroke-linejoin="round"/></g></svg>`;
 
 /** The same store on a jet seen from its front quarter, nose to the left. */
 function quarterStore(kind: StoreKind): string {
@@ -113,18 +100,24 @@ function quarterStore(kind: StoreKind): string {
 }
 
 /**
- * The weapons and anchor markers laid over a chase sprite. Stores are small drawn missiles on
- * their pylons; markers are invisible zero-size points the effects read their positions from.
+ * The weapons and anchor markers laid over a chase sprite. Stores are drawn missiles on their
+ * pylons; markers are invisible zero-size points the effects read their positions from.
  */
 function overlay(name: string, view: ChaseView, spent?: ReadonlySet<number>): string {
   const a = anchorsOf(name);
-  const store = view === "rear" ? sternStore : quarterStore;
   const stores = a.pylons
-    .map(([x, y, kind, mount], i) => `<i class="store store-${kind}${mount ? ` store-${mount}` : ""}${spent?.has(i) ? " spent" : ""}" data-st="${i}" data-kind="${kind}" style="left:${pct(x)};top:${pct(y)}">${store(kind)}</i>`)
+    .map((station, i) => {
+      const [x, y, kind, mount] = station;
+      const gone = !!spent?.has(i);
+      // Rear views carry their weapons in perspective; a bay only ever shows its doors.
+      if (view === "rear" && kind !== "bay") return hungStore(station, i, a, gone);
+      return `<i class="store store-${kind}${mount ? ` store-${mount}` : ""}${gone ? " spent" : ""}" data-st="${i}" data-kind="${kind}" style="left:${pct(x)};top:${pct(y)}">${view === "rear" ? BAY_STERN : quarterStore(kind)}</i>`;
+    })
     .join("");
   const ap = (kind: string, pts: Xy[] | undefined) => (pts ?? []).map(([x, y]) => `<i class="ap" data-ap="${kind}" style="left:${pct(x)};top:${pct(y)}"></i>`).join("");
   const one = (p: Xy | undefined) => (p ? [p] : undefined);
-  return `<div class="cj-over">${stores}${ap("gun", [a.gun])}${ap("flare", a.flares)}${ap("chaff", one(a.chaff))}${ap("pod", a.pods)}${ap("tip", a.tips)}${ap("belly", one(a.belly))}${ap("nose", one(a.nose))}</div>`;
+  const port = view === "rear" && a.port ? gunPort(a) : "";
+  return `<div class="cj-over">${port}${stores}${ap("gun", [a.gun])}${ap("flare", a.flares)}${ap("chaff", one(a.chaff))}${ap("pod", a.pods)}${ap("tip", a.tips)}${ap("belly", one(a.belly))}${ap("nose", one(a.nose))}</div>`;
 }
 
 /**

@@ -1,7 +1,7 @@
 /*
  * Draws the card recipes from cardfx.ts. Everything starts from a real place on the jet's sprite,
  * read from the anchor markers the renderer lays over it: tracer leaves the gun's muzzle, a missile
- * drops off the pylon it was hanging on, flares come out of the dispensers. Particles and drawn
+ * flies off the pylon it was hanging on, flares come out of the dispensers. Particles and drawn
  * effects go to the canvas in gfx.ts; the jet's own pose and its weapon stations are DOM.
  */
 
@@ -12,6 +12,7 @@ import { cardAnim, MAX_LEAD, type Impact, type Maneuver, type Shot, type Step, t
 import { addEffect, emit, flash, fxSprite, glow, shards, smoke, sparks } from "./gfx";
 import { anchor, artEl, center, depth, easeInOut, easeOut, hullPoint, lerp, livingFoes, mark, marks, midOf, muzzle, nozzles, rectOf, reduced, rnd, spriteEl, stations, timeScale, wait, type Pt } from "./geo";
 import { rearm, takeStation } from "./loadout";
+import { IMAGE_UNITS, SHAPES, storeImage, storeShape, type StoreShape } from "./stores";
 
 type Ctx2 = CanvasRenderingContext2D;
 type StepOf<K extends Step["fx"]> = Extract<Step, { fx: K }>;
@@ -129,6 +130,25 @@ export function hullSheen(who: number, tint: string, life = 0.5, strength = 0.8)
   });
 }
 
+/** The gun's flash lighting the skin around the muzzle for as long as it fires. */
+function muzzleLight(who: number, life: number) {
+  const box = spriteEl(who)?.querySelector("img")?.getBoundingClientRect();
+  const m = muzzle(who);
+  if (!box || !m || box.width < 8) return;
+  const fx = (m.x - box.left) / box.width;
+  const fy = (m.y - box.top) / box.height;
+  void hullFx(who, life, (o, w, h, k) => {
+    const r = w * 0.2;
+    const g = o.createRadialGradient(fx * w, fy * h, 0, fx * w, fy * h, r);
+    g.addColorStop(0, "#fff3d0");
+    g.addColorStop(0.3, "#ffb84dcc");
+    g.addColorStop(1, "#ff8a3c00");
+    o.globalAlpha = (0.55 + 0.45 * Math.random()) * pulse(k, 0.05, 0.3);
+    o.fillStyle = g;
+    o.fillRect(fx * w - r, fy * h - r, r * 2, r * 2);
+  });
+}
+
 /** Interference crawling over a hull: flickering bars, clipped to the airframe. */
 function hullStatic(who: number, life: number, delay = 0) {
   let frame = -1;
@@ -209,16 +229,27 @@ export function rearmJet(who: number): HTMLElement[] {
 }
 
 interface Launch {
-  /** Where the store is on screen. */
+  /** The middle of the weapon on screen. */
   p: Pt;
-  /** The drawn width of its station, for sizing the weapon as it comes off. */
-  w: number;
+  /** Which way it points, tail to nose, as a unit vector. */
+  dir: Pt;
+  /** Its length on screen, nose to tail. */
+  len: number;
+  shape: StoreShape;
   bay: boolean;
   /** -1 for the left wing, 1 for the right. */
   side: number;
 }
 
-/** Takes the next weapon of the wanted kinds off a jet: its pylon is left empty, or its bay door opens. */
+const spotOf = (el: Element): Pt => {
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+};
+
+/**
+ * Takes the next weapon of the wanted kinds off a jet: its pylon is left empty, or its bay door
+ * opens. The launch is given the exact place and heading of the weapon that was hanging there.
+ */
 function release(who: number, want: StoreKind[]): Launch | null {
   const all = stations(who);
   const index = takeStation(
@@ -228,21 +259,30 @@ function release(who: number, want: StoreKind[]): Launch | null {
   );
   const el = all[index];
   const mid = center(who);
+  const fallback: StoreShape = want.includes("agm") ? "agm" : "aim120";
   if (!el) {
     const p = muzzle(who);
-    return p ? { p, w: 16 * depth(who), bay: false, side: Math.random() < 0.5 ? -1 : 1 } : null;
+    return p ? { p, dir: { x: 0, y: -1 }, len: 34 * depth(who), shape: fallback, bay: false, side: Math.random() < 0.5 ? -1 : 1 } : null;
   }
-  const r = el.getBoundingClientRect();
-  const kind = el.dataset.kind;
+  const kind = el.dataset.kind as StoreKind;
   const bay = kind === "bay";
   if (bay) {
     el.classList.add("open");
     later(720, () => el.classList.remove("open"));
   } else if (kind !== "pod") el.classList.add("spent");
   el.classList.remove("fresh");
-  const tip = el.classList.contains("store-tip");
-  const p = { x: r.left + r.width / 2, y: r.top + r.height * (bay ? 0.25 : tip ? 0.5 : 0.62) };
-  return { p, w: r.width, bay, side: mid && p.x < mid.x ? -1 : 1 };
+  const nose = el.querySelector(".sn");
+  const tail = el.querySelector(".st");
+  if (nose && tail) {
+    const a = spotOf(tail);
+    const b = spotOf(nose);
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const p = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    return { p, dir: { x: (b.x - a.x) / len, y: (b.y - a.y) / len }, len, shape: (el.dataset.shape as StoreShape) ?? storeShape(kind), bay: false, side: mid && p.x < mid.x ? -1 : 1 };
+  }
+  const r = el.getBoundingClientRect();
+  const p = { x: r.left + r.width / 2, y: r.top + r.height * (bay ? 0.25 : 0.62) };
+  return { p, dir: { x: 0, y: -1 }, len: r.width * (bay ? 0.8 : 0.9), shape: bay ? fallback : storeShape(kind), bay, side: mid && p.x < mid.x ? -1 : 1 };
 }
 
 /* ----------------------------------------------------------------- casts */
@@ -683,6 +723,52 @@ function sternView(c: Ctx2, x: number, y: number, r: number, lit: number, body =
   c.globalAlpha = alpha;
 }
 
+const storeImages = new Map<StoreShape, HTMLImageElement>();
+
+/** The drawing of a store as an image for the canvas, once it has decoded. */
+function storeSprite(shape: StoreShape): HTMLImageElement | null {
+  if (typeof Image === "undefined") return null;
+  let img = storeImages.get(shape);
+  if (!img) {
+    img = new Image();
+    img.src = `data:image/svg+xml,${encodeURIComponent(storeImage(shape))}`;
+    storeImages.set(shape, img);
+  }
+  return img.complete && img.naturalWidth > 0 ? img : null;
+}
+
+if (typeof Image !== "undefined") for (const shape of Object.keys(SHAPES) as StoreShape[]) storeSprite(shape);
+
+/**
+ * A weapon in flight, drawn with the very picture that hung on the pylon: centred on `p`, pointing
+ * along `dir`, `len` long on screen. `lit` is how hard its motor is burning.
+ */
+function drawWeapon(c: Ctx2, shape: StoreShape, p: Pt, dir: Pt, len: number, lit: number) {
+  const s = SHAPES[shape];
+  const box = (len * 100) / s.len;
+  const tail = { x: p.x - (dir.x * len) / 2, y: p.y - (dir.y * len) / 2 };
+  const r = (s.r * box) / 100;
+  const img = storeSprite(shape);
+  if (img && box >= 9) {
+    c.save();
+    c.globalCompositeOperation = "source-over";
+    c.translate(p.x, p.y);
+    c.rotate(Math.atan2(dir.y, dir.x) + Math.PI / 2);
+    const side = (box * IMAGE_UNITS) / 100;
+    c.drawImage(img, -side / 2, -side / 2, side, side);
+    c.restore();
+  } else sternView(c, tail.x, tail.y, Math.max(0.8, r), 0);
+  if (lit <= 0) return;
+  const alpha = c.globalAlpha;
+  c.globalCompositeOperation = "lighter";
+  c.globalAlpha = alpha * Math.min(1, lit);
+  const g = r * rnd(3.4, 4.4) + 3;
+  c.drawImage(fxSprite("glow", FIRE), tail.x - g, tail.y - g, g * 2, g * 2);
+  const w = r * 1.6 + 1.5;
+  c.drawImage(fxSprite("glow", "#ffffff"), tail.x - w, tail.y - w, w * 2, w * 2);
+  c.globalAlpha = alpha;
+}
+
 function bezier(a: Pt, c1: Pt, c2: Pt, b: Pt, t: number): Pt {
   const u = 1 - t;
   return {
@@ -691,30 +777,42 @@ function bezier(a: Pt, c1: Pt, c2: Pt, b: Pt, t: number): Pt {
   };
 }
 
-/** The gun firing: a stab of flame out of the muzzle towards the target, and smoke swept back past the jet. */
+/** The gun firing: a star of flame at the muzzle stabbing towards the target, lighting the jet around it, and smoke swept back. */
 function muzzleFlash(a: Pt, toward: Pt, k: number, cal: number, round: number) {
   const dir = Math.atan2(toward.y - a.y, toward.x - a.x);
-  const s = (8 + 7 * cal) * k * rnd(0.8, 1.2);
-  flash(a.x, a.y, s * 0.9, "#ffd27a", 0.07);
+  const s = (12 + 8 * cal) * k * rnd(0.8, 1.2);
+  flash(a.x, a.y, s * 1.1, "#ffd27a", 0.09);
+  glow(a.x, a.y, s * 2.4, "#ffb347", 0.12, s, 0.45);
   void addEffect({
-    life: 0.06,
+    life: 0.075,
     draw: (c, t) => {
       c.globalCompositeOperation = "lighter";
-      c.globalAlpha = 1 - t;
+      c.globalAlpha = 1 - t * t;
       c.translate(a.x, a.y);
       c.rotate(dir);
-      const g = c.createLinearGradient(0, 0, s * 2.8, 0);
+      const g = c.createLinearGradient(0, 0, s * 3.2, 0);
       g.addColorStop(0, "#ffffff");
-      g.addColorStop(0.4, "#ffc45a");
+      g.addColorStop(0.35, "#ffd27a");
       g.addColorStop(1, "#ff7a2a00");
       c.fillStyle = g;
       c.beginPath();
-      c.moveTo(0, -s * 0.34);
-      c.quadraticCurveTo(s * 1.3, -s * 0.55, s * 2.8, 0);
-      c.quadraticCurveTo(s * 1.3, s * 0.55, 0, s * 0.34);
+      c.moveTo(-s * 0.2, 0);
+      c.quadraticCurveTo(s * 0.5, -s * 0.62, s * 3.2, 0);
+      c.quadraticCurveTo(s * 0.5, s * 0.62, -s * 0.2, 0);
       c.fill();
-      // The gases that escape sideways at the muzzle.
-      c.fillRect(-s * 0.12, -s * 0.9, s * 0.24, s * 1.8);
+      // The gases that escape sideways at the muzzle make the flash a star.
+      c.fillStyle = "#ffe2a6";
+      for (const side of [-1, 1]) {
+        c.beginPath();
+        c.moveTo(-s * 0.16, 0);
+        c.lineTo(s * 0.1, side * s * 1.25);
+        c.lineTo(s * 0.34, 0);
+        c.fill();
+      }
+      c.beginPath();
+      c.arc(0, 0, s * 0.42, 0, TAU);
+      c.fillStyle = "#ffffff";
+      c.fill();
     },
   });
   if (round % 2 === 0) smoke(a.x, a.y, (6 + 5 * cal) * k, "#d5d9de", 0.45 + 0.2 * cal, { alpha: 0.12 + 0.1 * cal, vx: rnd(-14, 14), vy: rnd(14, 44) * k, grow: (16 + 12 * cal) * k });
@@ -752,6 +850,7 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
     const rect = spriteEl(to)?.getBoundingClientRect();
     const burst = (s.rounds - 1) * s.gap;
     if (aim.index === 0) {
+      muzzleLight(from, (burst + 140) / 1000);
       if (s.pass) closeIn(from, to, burst + s.ms + 320);
       else if (cal > 1.3) shudder(from, burst + 140, 2.5);
     }
@@ -816,41 +915,57 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
     const store = release(from, s.store === "agm" ? ["agm", "bay"] : ["aam", "bay"]);
     if (!store) return wait(s.ms);
     const trail = SMOKE[s.smoke];
-    const r0 = Math.max(2.4, store.w * (store.bay ? 0.09 : s.store === "agm" ? 0.26 : 0.2));
-    if (store.bay) await wait(130);
-    // It falls clear of the jet before the motor lights.
-    const fall = store.w * (store.bay ? 0.7 : 0.8);
-    await tick((store.bay ? 0.15 : 0.12) * (from === PLAYER ? 1 : 0.8), (_dt, k, _age, c) => sternView(c, store.p.x, store.p.y + fall * k * k, r0, 0));
-    const p0 = { x: store.p.x, y: store.p.y + fall };
-    flash(p0.x, p0.y, r0 * 3.2 * s.size, FIRE, 0.12);
-    for (let i = 0; i < 4; i++) smoke(p0.x, p0.y, r0 * trail.size * 1.4, trail.color, trail.life, { alpha: trail.alpha, vx: rnd(-20, 20), vy: rnd(20, 70) * ka, grow: r0 * trail.size * 3 });
+    const { shape, len } = store;
+    const body = (SHAPES[shape].r / SHAPES[shape].len) * len;
+    let p0 = store.p;
+    let dir0 = store.dir;
+    if (store.bay) {
+      // A bay throws its weapon clear of the jet before the motor lights.
+      await wait(130);
+      const fall = len * 0.9;
+      await tick(0.15 * (from === PLAYER ? 1 : 0.8), (_dt, k, _age, c) => drawWeapon(c, shape, { x: p0.x, y: p0.y + fall * k * k }, dir0, len, 0));
+      p0 = { x: p0.x, y: p0.y + fall };
+    }
+    const tailOf = (p: Pt, dir: Pt, l: number): Pt => ({ x: p.x - (dir.x * l) / 2, y: p.y - (dir.y * l) / 2 });
+    // The motor lights where the missile hangs: a flare at its tail and smoke blown back past the wing.
+    const t0 = tailOf(p0, dir0, len);
+    flash(t0.x, t0.y, body * 4.5 * s.size, FIRE, 0.14);
+    for (let i = 0; i < 5; i++) smoke(t0.x, t0.y, body * trail.size * 1.3, trail.color, trail.life, { alpha: trail.alpha, vx: -dir0.x * rnd(20, 70) * ka + rnd(-14, 14), vy: -dir0.y * rnd(20, 70) * ka + rnd(10, 40) * ka, grow: body * trail.size * 3.2 });
+    if (!store.bay) await tick(0.06, (_dt, k, _age, c) => drawWeapon(c, shape, p0, dir0, len, k * s.size ** 0.5));
     const rect = spriteEl(to)?.getBoundingClientRect();
     const hull = hullPoint(to, 0.6) ?? aim.b;
     // A dodged missile loses its lock and sails by wide of the target.
     const land = aim.miss && rect ? { x: hull.x + store.side * rect.width * 0.75, y: hull.y - rect.height * 1.3 } : hull;
     const far = (kb / ka) * (aim.miss ? 0.5 : 1);
-    // It surges straight ahead off the rail, then the seeker pulls it round onto the target.
-    const c1 = { x: p0.x + store.side * (16 + s.loft * 0.5) * ka, y: lerp(p0.y, land.y, 0.5) - s.loft * ka };
+    // It runs straight off the rail the way it was pointing, then the seeker pulls it round onto the target.
+    const reach = Math.hypot(land.x - p0.x, land.y - p0.y) * 0.3 + s.loft * ka * 0.4 + len;
+    const c1 = { x: p0.x + dir0.x * reach, y: p0.y + dir0.y * reach };
     const c2 = { x: land.x + store.side * (16 + s.loft * 0.4) * kb * 2, y: land.y + (36 - s.loft * 0.3) * kb };
     let prev = 0;
-    let last: Pt = p0;
+    let last: Pt = t0;
+    let heading = dir0;
     await addEffect({
       life: (s.ms / 1000) * (aim.miss ? 1.2 : 1),
       draw: (c, k) => {
         const e = (k ** 1.7 * (1 - 0.25 * k)) / 0.75;
+        // Seen from behind it shrinks as it goes, and shortens as it turns end-on to the camera.
+        const lenAt = (t: number) => len * lerp(1, far, t) * (1 - 0.3 * t);
         const steps = Math.max(1, Math.ceil((e - prev) / 0.012));
         for (let i = 1; i <= steps; i++) {
           const t = prev + ((e - prev) * i) / steps;
-          const p = bezier(p0, c1, c2, land, t);
-          const r = r0 * lerp(1, far, t) * s.size;
-          if (Math.hypot(p.x - last.x, p.y - last.y) < r * 1.5) continue;
-          last = p;
-          smoke(p.x, p.y, r * trail.size, trail.color, trail.life, { alpha: trail.alpha * (aim.miss ? 0.7 : 1), vx: rnd(-4, 4), vy: rnd(2, 12), grow: r * trail.size * 1.5 });
+          const q = tailOf(bezier(p0, c1, c2, land, t), heading, lenAt(t));
+          const r = body * lerp(1, far, t) * s.size;
+          if (Math.hypot(q.x - last.x, q.y - last.y) < r * 1.5) continue;
+          last = q;
+          smoke(q.x, q.y, r * trail.size, trail.color, trail.life, { alpha: trail.alpha * (aim.miss ? 0.7 : 1), vx: rnd(-4, 4), vy: rnd(2, 12), grow: r * trail.size * 1.5 });
         }
         prev = e;
         const p = bezier(p0, c1, c2, land, e);
+        const ahead = bezier(p0, c1, c2, land, Math.min(1, e + 0.02));
+        const d = Math.hypot(ahead.x - p.x, ahead.y - p.y);
+        if (d > 0.5) heading = { x: (ahead.x - p.x) / d, y: (ahead.y - p.y) / d };
         if (aim.miss) c.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : 1;
-        sternView(c, p.x, p.y, Math.max(0.8, r0 * lerp(1, far, e)), Math.min(1, k * 8) * s.size ** 0.5);
+        drawWeapon(c, shape, p, heading, lenAt(e), (0.7 + Math.min(1, k * 6) * 0.5) * s.size ** 0.5);
       },
     });
     if (!aim.miss) setLanding(to, land);
@@ -872,8 +987,9 @@ const SHOTS: { [K in Shot["fx"]]: (s: ShotOf<K>, aim: Aim) => Promise<void> } = 
         draw: (c, k) => {
           if (!a) {
             // Rockets ripple out of alternate pods.
-            const pod = pods[(i + aim.index) % Math.max(1, pods.length)]?.getBoundingClientRect();
-            a = pod ? { x: pod.left + pod.width / 2, y: pod.top + pod.height * 0.6 } : muzzle(from);
+            const pod = pods[(i + aim.index) % Math.max(1, pods.length)];
+            const mouth = pod?.querySelector(".sn");
+            a = mouth ? spotOf(mouth) : pod ? spotOf(pod) : muzzle(from);
             if (!a) return;
             flash(a.x, a.y, 9 * ka, FIRE, 0.07);
             smoke(a.x, a.y, 9 * ka, "#d5d9de", 0.5, { alpha: 0.3, vy: 60 * ka, grow: 30 * ka });

@@ -2575,38 +2575,72 @@ button.card {
 
 .store {
   position: absolute;
-  width: 4%;
-  translate: -50% -4%;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
 }
 
-.store svg {
+/*
+ * A weapon on a rear view. The box is centred on the weapon's middle, which hangs `--drop` below
+ * the point where its pylon meets the wing; the weapon leans in by `--tilt` to the sprite's
+ * perspective while the pylon stays upright.
+ */
+.hung {
+  width: var(--sz);
+  aspect-ratio: 1;
+  translate: -50% calc(-50% + var(--drop));
+}
+
+.hung svg {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
   overflow: visible;
 }
 
-.store-agm {
-  width: 4.8%;
+.hung .pyl {
+  position: absolute;
+  inset: 0;
 }
 
-/* A wingtip rail: the missile sits on the tip, with no pylon. */
-.store-tip {
-  translate: -50% -58%;
+.hung .msl {
+  position: absolute;
+  inset: 0;
+  rotate: var(--tilt);
 }
 
-.store-tip .pyl {
-  display: none;
+/* Zero-size markers at the weapon's nose and tail: a launch reads its line from them. */
+.hung .sn,
+.hung .st {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
 }
 
-.store-pod {
-  width: 5%;
+.gunport {
+  position: absolute;
+  width: var(--sz);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  rotate: var(--tilt);
+}
+
+.gunport svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .store-bay {
   width: 9%;
   translate: -50% -10%;
+}
+
+.store-bay svg,
+.cj-front .store svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
 }
 
 .cj-front .store {
@@ -2616,6 +2650,10 @@ button.card {
 
 .cj-front .store-agm {
   width: 12.5%;
+}
+
+.cj-front .store-pod {
+  width: 11%;
 }
 
 .cj-front .store-bay {
@@ -2630,10 +2668,13 @@ button.card {
   opacity: 0;
 }
 
-/* A rearmed station: the new round is pushed up onto the rail. */
+/* A rearmed station: the new round is slid up the rail from behind. */
 .store.fresh .msl {
   animation: rearm 0.32s cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
   animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+.cj-front .store.fresh .msl {
   transform-box: fill-box;
   transform-origin: 50% 0;
 }
@@ -2834,8 +2875,9 @@ button.card {
   width: calc(var(--ws) * var(--u));
 }
 
+/* The flight renderer sways the player's jet and the backdrop's camera together. */
 .ally .unit-art {
-  animation: chase-sway 7s ease-in-out infinite;
+  animation: none;
 }
 
 @keyframes chase-sway {
@@ -5722,4 +5764,140 @@ div.loot > span {
     gap: 10px;
     padding-top: 10px;
   }
+}
+
+/* The anchor sheet (#anchors): every chase sprite with its anchor points marked. */
+.dbg-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: auto;
+  padding: 14px 18px 40px;
+  background: #3f6690;
+  color: #fff;
+  font: 500 13px/1.3 var(--body);
+}
+
+.dbg-sheet header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin-bottom: 14px;
+}
+
+.dbg-sheet h1 {
+  margin: 0;
+  font: 700 20px/1 var(--cond);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dbg-sheet a {
+  margin-left: auto;
+  color: #fff;
+}
+
+.dbg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 22px 18px;
+  align-items: end;
+}
+
+.dbg-grid.dbg-solo {
+  grid-template-columns: minmax(0, 1100px);
+  justify-content: center;
+}
+
+.dbg-item {
+  margin: 0;
+}
+
+.dbg-item figcaption {
+  margin-top: 6px;
+  font: 600 13px/1 var(--cond);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.dbg-sprite {
+  position: relative;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+  background-size: 10% 10%;
+  outline: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.dbg-dots {
+  position: absolute;
+  inset: 0;
+}
+
+.dbg-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px;
+  border-radius: 50%;
+  background: #35ff6b;
+  box-shadow: 0 0 0 1.5px #000;
+}
+
+.dbg-dot b {
+  position: absolute;
+  left: 9px;
+  top: -5px;
+  padding: 0 3px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.72);
+  color: inherit;
+  font: 600 10px/1.4 var(--cond);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.dbg-gun {
+  background: #ff3838;
+  color: #ffb3b3;
+}
+
+.dbg-stn {
+  background: #ffa726;
+  color: #ffd699;
+}
+
+.dbg-flare {
+  background: #ffee33;
+  color: #fff6a3;
+}
+
+.dbg-pod {
+  background: #ff4dff;
+  color: #ffbfff;
+}
+
+.dbg-tip {
+  background: #33e6ff;
+  color: #b8f5ff;
+}
+
+.dbg-chaff {
+  background: #ffffff;
+}
+
+.dbg-belly {
+  background: #5c8dff;
+  color: #c2d4ff;
+}
+
+.dbg-nose {
+  color: #b5ffc8;
+}
+
+.no-stores .store,
+.no-stores .gunport,
+.no-dots .dbg-dots,
+.no-labels .dbg-dot b {
+  display: none;
 }

@@ -224,6 +224,20 @@ def save_square(src: Path, name: str, out: str, size: int, quality: int):
     img.save(path, "WEBP", quality=quality, method=6)
 
 
+def write_masks():
+    """A coarse map of where each chase sprite is solid, for the test that keeps every anchor on the airframe."""
+    out = {}
+    for path in sorted((OUT / "chase").glob("*.webp")):
+        alpha = Image.open(path).convert("RGBA").getchannel("A")
+        w = 128
+        h = max(1, round(alpha.height * w / alpha.width))
+        cells = np.asarray(alpha.resize((w, h), Image.BOX)) > 110
+        # One hex string per row, four cells to a digit, left to right.
+        rows = ["".join(f"{int(''.join('1' if c else '0' for c in row[i:i + 4]), 2):x}" for i in range(0, w, 4)) for row in cells]
+        out[path.stem] = {"w": w, "h": h, "rows": rows}
+    (OUT / "chase-mask.json").write_text(json.dumps(out, separators=(",", ":")) + "\n")
+
+
 def main():
     src = Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/artsrc")
     meta = process_jets(src)
@@ -243,6 +257,7 @@ def main():
         save_rgb(src, path.name, f"events/{path.stem[3:]}.webp", 560, 62)
     for path in sorted(src.glob("art_*.jpg")):
         save_rgb(src, path.name, f"cards/{path.stem[4:]}.webp", 340, 64)
+    write_masks()
     total = sum(p.stat().st_size for p in OUT.rglob("*.webp"))
     print(f"wrote {len(list(OUT.rglob('*.webp')))} files, {total / 1024:.0f} KiB")
 

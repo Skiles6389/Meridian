@@ -233,9 +233,10 @@ function kick() {
   requestAnimationFrame(frame);
 }
 
-function frame(now: number) {
+function frame() {
   if (!ctx || !canvas) return;
-  // Real elapsed time, so effects stay in step with the fight's timeline even when frames run long.
+  // Real elapsed time, read from the same clock as the fight's timers, so effects stay in step with them even when frames run long.
+  const now = performance.now();
   const raw = last ? Math.min(0.25, (now - last) / 1000) : 0.016;
   last = now;
   const dt = now < frozenUntil ? 0 : raw * rate;

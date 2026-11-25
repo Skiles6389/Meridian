@@ -360,8 +360,9 @@ function fly(foe: HTMLElement, curve: Curve, a: Spot, b: Spot, ms: number, box: 
     let view: FlightView | undefined;
     let lastTrail: Pt | null = null;
     let lastZip = 0;
-    const step = (now: number) => {
+    const step = () => {
       if (!foe.isConnected) return resolve();
+      const now = performance.now();
       const k = Math.min(1, (now - start) / Math.max(1, ms * timeScale()));
       const t = Math.max(0, Math.min(1, PACE[pace](k)));
       const p = cubic(curve, t);

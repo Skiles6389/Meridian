@@ -5,6 +5,24 @@ import { JETS } from "../src/game/jets";
 import type { SilhouetteId } from "../src/game/types";
 import { ANCHORS, anchorsOf, FALLBACK_ANCHORS, type SpriteAnchors, type Xy } from "../src/ui/anchors";
 import { rearm, spentStations, takeStation } from "../src/ui/loadout";
+import chaseMask from "../src/assets/art/chase-mask.json";
+
+interface Mask {
+  w: number;
+  h: number;
+  /** One hex string per row of cells, four cells to a digit; a set bit is a solid cell. */
+  rows: string[];
+}
+
+const MASKS = chaseMask as Record<string, Mask>;
+
+/** Whether a point, in percentages of the sprite's box, lands on the sprite's own opaque pixels. */
+function onSprite(name: string, [x, y]: Xy | [number, number, ...unknown[]]): boolean {
+  const mask = MASKS[name];
+  const cx = Math.min(mask.w - 1, Math.max(0, Math.floor((x / 100) * mask.w)));
+  const cy = Math.min(mask.h - 1, Math.max(0, Math.floor((y / 100) * mask.h)));
+  return ((parseInt(mask.rows[cy][cx >> 2], 16) >> (3 - (cx & 3))) & 1) === 1;
+}
 
 /** The three Tornado variants share one chase airframe, as in art.ts. */
 const body = (id: SilhouetteId) => (id.startsWith("tornado_") ? "tornado" : id);
@@ -52,6 +70,25 @@ describe("sprite anchors", () => {
   it("has anchors for every chase sprite in the art folder, and none for a sprite that is not there", () => {
     const sprites = Object.keys(chaseMeta).sort();
     expect(Object.keys(ANCHORS).sort()).toEqual(sprites);
+  });
+
+  it("puts every anchor on the airframe: none hangs in the transparent air around the sprite", () => {
+    expect(Object.keys(MASKS).sort()).toEqual(Object.keys(chaseMeta).sort());
+    const off: string[] = [];
+    for (const [name, a] of Object.entries(ANCHORS)) {
+      const points: [string, Xy | [number, number, ...unknown[]]][] = [
+        ["gun", a.gun],
+        ...a.pylons.map((p, i): [string, [number, number, ...unknown[]]] => [`station ${i}`, p]),
+        ...(a.flares ?? []).map((p, i): [string, Xy] => [`flare ${i}`, p]),
+        ...(a.pods ?? []).map((p, i): [string, Xy] => [`pod ${i}`, p]),
+        ...(a.tips ?? []).map((p, i): [string, Xy] => [`tip ${i}`, p]),
+        ...(a.chaff ? [["chaff", a.chaff] as [string, Xy]] : []),
+        ...(a.belly ? [["belly", a.belly] as [string, Xy]] : []),
+        ...(a.nose ? [["nose", a.nose] as [string, Xy]] : []),
+      ];
+      for (const [what, p] of points) if (!onSprite(name, p)) off.push(`${name} ${what} [${p[0]}, ${p[1]}]`);
+    }
+    expect(off).toEqual([]);
   });
 
   it("puts the guns where the real ones are", () => {

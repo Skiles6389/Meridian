@@ -6,6 +6,7 @@ import "@fontsource/barlow-condensed/latin-800.css";
 import "@fontsource/saira-stencil-one/latin-400.css";
 import "./styles.css";
 import "./motion.css";
+import { initAnchorSheet } from "./ui/debug";
 import { audioDebug, configureAudio, setAmbience, setMusic, sfx, unlockAudio, type Track } from "./audio";
 import { getCard } from "./game/cards";
 import { attackersOf, enemiesTakeLead, splitTurnEvents } from "./game/chase";
@@ -946,7 +947,8 @@ window.addEventListener("resize", () => {
   }, 140);
 });
 
-if (import.meta.env.DEV) (window as unknown as { __dogfight: unknown }).__dogfight = { app, draw, persist, setSlowMo, particleCount, effectCount };
+if (import.meta.env.DEV) (window as unknown as { __dogfight: unknown }).__dogfight = { app, draw, persist, play, setSlowMo, particleCount, effectCount };
 (window as unknown as { __dogfightAudio: unknown }).__dogfightAudio = audioDebug;
+initAnchorSheet();
 
 draw();
