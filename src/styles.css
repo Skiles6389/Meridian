@@ -2621,6 +2621,111 @@ button.card {
   transform: scaleX(-1);
 }
 
+/* Weapon stations and anchor markers, mirrored with the painting when it is flipped. */
+.cj-over {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cj.flip .cj-over {
+  transform: scaleX(-1);
+}
+
+.ap {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.store {
+  position: absolute;
+  width: 4%;
+  translate: -50% -4%;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+}
+
+.store svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.store-agm {
+  width: 4.8%;
+}
+
+/* A wingtip rail: the missile sits on the tip, with no pylon. */
+.store-tip {
+  translate: -50% -58%;
+}
+
+.store-tip .pyl {
+  display: none;
+}
+
+.store-pod {
+  width: 5%;
+}
+
+.store-bay {
+  width: 8%;
+  translate: -50% -10%;
+}
+
+.cj-front .store {
+  width: 10.5%;
+  translate: -50% -8%;
+}
+
+.cj-front .store-agm {
+  width: 12.5%;
+}
+
+.cj-front .store-bay {
+  width: 11%;
+}
+
+.store .msl {
+  transition: opacity 0.05s linear;
+}
+
+.store.spent .msl {
+  opacity: 0;
+}
+
+/* A rearmed station: the new round is pushed up onto the rail. */
+.store.fresh .msl {
+  animation: rearm 0.32s cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
+  transform-box: fill-box;
+  transform-origin: 50% 0;
+}
+
+@keyframes rearm {
+  from {
+    opacity: 0;
+    transform: translateY(46%);
+  }
+}
+
+/* Bay doors stay shut until a weapon comes out. */
+.store-bay .door {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: 50% 0;
+  transform: scaleY(0.1);
+  transition:
+    transform 0.14s ease-out,
+    opacity 0.08s linear;
+}
+
+.store-bay.open .door {
+  opacity: 1;
+  transform: none;
+}
+
 .cj-glow {
   position: absolute;
   left: var(--gx);

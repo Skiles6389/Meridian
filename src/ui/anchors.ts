@@ -1,0 +1,134 @@
+/*
+ * Where things are on each chase-camera sprite, read off the art: the gun muzzle, the weapon
+ * stations, the countermeasure dispensers and so on. Every value is a percentage of the sprite's
+ * box, x from the left and y from the top. Effects start from these points, so a burst leaves the
+ * jet's real gun port and a missile comes off the pylon it was hanging on.
+ *
+ * Front-quarter views are drawn nose-left; the renderer mirrors the anchors with the sprite.
+ */
+
+export type StoreKind =
+  /** A light air-to-air missile on a rail or pylon. */
+  | "aam"
+  /** A heavy missile on an inboard pylon. */
+  | "agm"
+  /** A rocket pod: it stays on the wing and fires from where it hangs. */
+  | "pod"
+  /** An internal weapons bay: nothing hangs outside, and the door opens to launch. */
+  | "bay";
+
+export type Xy = [number, number];
+/** `mount` is "tip" for a wingtip rail, where the missile sits on the wing instead of hanging under it. */
+export type Station = [x: number, y: number, kind: StoreKind, mount?: "tip"];
+
+export interface SpriteAnchors {
+  /** The gun muzzle. */
+  gun: Xy;
+  /** Weapon stations, in the order they fire. */
+  pylons: Station[];
+  /** Flare dispensers. */
+  flares?: Xy[];
+  /** Where chaff leaves the tail. */
+  chaff?: Xy;
+  /** Jamming pods and antennas. */
+  pods?: Xy[];
+  /** Wingtips, for vapour. */
+  tips?: Xy[];
+  /** Under the fuselage, where bombs fall from. */
+  belly?: Xy;
+  /** The radome. */
+  nose?: Xy;
+}
+
+export const ANCHORS: Record<string, SpriteAnchors> = {
+  /* ------------------------------------------------ player jets, from behind */
+  // F-16C: M61 in the left wing root; wingtip rails and four underwing stations.
+  "f16-rear": {
+    gun: [43.5, 58],
+    pylons: [[3.5, 66.3, "aam", "tip"], [96.5, 66.3, "aam", "tip"], [15, 67, "aam"], [85, 67, "aam"], [27, 67.6, "agm"], [73, 67.6, "agm"]],
+    flares: [[45, 86], [55, 86]],
+    chaff: [50, 90],
+    tips: [[3, 68], [97, 69]],
+    belly: [50, 93],
+    nose: [50, 42],
+  },
+  // F-15E: M61 in the right wing root.
+  "f15e-rear": {
+    gun: [61, 44],
+    pylons: [[10, 66, "aam"], [90, 66, "aam"], [17, 65.5, "agm"], [83, 65.5, "agm"]],
+    flares: [[41, 91], [59, 91]],
+    chaff: [50, 95],
+    tips: [[4, 63.5], [96, 63.5]],
+    belly: [50, 97],
+    nose: [50, 10],
+  },
+  // F-22A: M61 above the right wing root; everything else rides in the belly bays.
+  "f22-rear": {
+    gun: [57, 31],
+    pylons: [[46.5, 88, "bay"], [53.5, 88, "bay"]],
+    flares: [[37, 84], [63, 84]],
+    chaff: [50, 92],
+    tips: [[4, 65], [96, 65]],
+    belly: [50, 95],
+    nose: [50, 6],
+  },
+  // EA-18G: nose gun position; wingtip receiver pods and underwing jammers are part of the art.
+  "ea18g-rear": {
+    gun: [50, 24],
+    pylons: [[12, 65, "agm"], [88, 65, "agm"]],
+    flares: [[43, 89], [57, 89]],
+    chaff: [50, 95],
+    pods: [[5, 61], [95, 61], [21, 77], [80, 77]],
+    tips: [[4, 61], [96, 61]],
+    belly: [50, 96],
+    nose: [50, 18],
+  },
+  // A-10C: GAU-8 under the nose, a touch left of the centreline.
+  "a10-rear": {
+    gun: [49.3, 8],
+    pylons: [[16.5, 66.5, "agm"], [84.5, 66.5, "agm"], [9, 54, "aam"], [91, 54, "aam"], [23, 69, "pod"], [78, 69, "pod"]],
+    flares: [[36, 77], [64, 77]],
+    chaff: [50, 96],
+    tips: [[4, 52], [96, 52]],
+    belly: [50, 97],
+    nose: [50, 5],
+  },
+
+  /* --------------------------------------------------- enemies, from behind */
+  // F-104G: M61 low on the left of the forward fuselage.
+  "f104-rear": { gun: [46.5, 42], pylons: [[20, 72, "aam"], [80, 72, "aam"]] },
+  // Alpha Jet: 27 mm gun pod on the centreline.
+  "alphajet-rear": { gun: [50, 97], pylons: [[19.5, 69.5, "aam"], [81, 69.5, "aam"]] },
+  // F-4F: M61 under the nose.
+  "f4f-rear": { gun: [50, 27], pylons: [[16.5, 78, "aam"], [83.5, 78, "aam"]] },
+  // MiG-29G: GSh-30-1 in the left wing root.
+  "mig29-rear": { gun: [44.5, 30], pylons: [[18.5, 69.5, "aam"], [81.5, 69.5, "aam"], [12, 68.8, "aam"], [88, 69, "aam"]] },
+  // Tornado: 27 mm Mauser low on the right of the forward fuselage.
+  "tornado-rear": { gun: [53.5, 38], pylons: [[22.5, 71.5, "aam"], [78, 71.5, "aam"]] },
+  // Typhoon: 27 mm Mauser in the right wing root.
+  "typhoon-rear": { gun: [58, 43], pylons: [[16.5, 82, "aam"], [84, 82.5, "aam"], [10, 84.5, "aam"], [90.5, 85, "aam"]] },
+  // F-35A: GAU-22 above the left wing root; internal bays.
+  "f35-rear": { gun: [42.5, 30], pylons: [[43, 85.5, "bay"], [57, 85.5, "bay"]] },
+  "f4f_boss-rear": { gun: [50, 5], pylons: [[13, 67, "aam"], [87, 67, "aam"]] },
+  "typhoon_boss-rear": { gun: [57.5, 33], pylons: [[12.5, 80.5, "aam"], [87.5, 80.5, "aam"]] },
+  "f35_boss-rear": { gun: [43, 27], pylons: [[43, 87, "bay"], [57, 87, "bay"]] },
+
+  /* ---------------------------------------- enemies, from the front quarter */
+  "f104-front": { gun: [33, 75], pylons: [[74, 82, "aam"], [80, 77, "aam"]] },
+  "alphajet-front": { gun: [35, 94], pylons: [[76, 70, "aam"], [13, 68, "aam"]] },
+  "f4f-front": { gun: [22, 79], pylons: [[84, 71, "aam"], [63, 76, "aam"]] },
+  "mig29-front": { gun: [31, 60], pylons: [[72, 75, "aam"], [84, 79, "aam"]] },
+  "tornado-front": { gun: [27, 84], pylons: [[70, 74, "aam"], [60, 81, "aam"]] },
+  "typhoon-front": { gun: [36, 52], pylons: [[62, 85, "aam"], [74, 85, "aam"]] },
+  "f35-front": { gun: [38, 52], pylons: [[45, 91, "bay"], [32, 88, "bay"]] },
+  "f4f_boss-front": { gun: [10, 92], pylons: [[62, 84, "aam"], [72, 82, "aam"]] },
+  "typhoon_boss-front": { gun: [36, 63], pylons: [[56, 81, "aam"], [68, 81, "aam"]] },
+  "f35_boss-front": { gun: [38, 62], pylons: [[40, 85, "bay"], [28, 86, "bay"]] },
+};
+
+/** Used for a sprite with no entry, so a new airframe still fires from somewhere sensible. */
+export const FALLBACK_ANCHORS: SpriteAnchors = { gun: [50, 40], pylons: [[30, 70, "aam"], [70, 70, "aam"]] };
+
+export function anchorsOf(sprite: string): SpriteAnchors {
+  return ANCHORS[sprite] ?? FALLBACK_ANCHORS;
+}

@@ -1,6 +1,6 @@
 import { ACTS } from "../game/acts";
 import { getCard } from "../game/cards";
-import { cardCost, enemyPlan, forecastLoss } from "../game/combat";
+import { cardCost, enemyPlan, forecastLoss, PLAYER } from "../game/combat";
 import { getEncounter, getEnemy } from "../game/enemies";
 import { getEvent } from "../game/events";
 import { bestClear, difficultyName, highestUnlocked, MAX_THREAT, NORMAL, ROOKIE, ROOKIE_TEXT, THREAT_STEPS } from "../game/difficulty";
@@ -11,6 +11,7 @@ import { nodeById } from "../game/map";
 import { getRelic } from "../game/relics";
 import { choiceAvailable, reachable, removalCost, repairOf } from "../game/run";
 import type { CardDef, Fighter, MapNode, NodeType, Plan, RunState, Status } from "../game/types";
+import { spentStations } from "./loadout";
 import { ACT_SCENE, CHASE_SCENE, SCENE_ART, cardArt, chaseArt, chaseAspect, eventArt, jetArt } from "./art";
 import { allySpot, foeSpots, type CamShape, type Spot } from "./camera";
 import { icon, nodeIcon, relicIcon } from "./icons";
@@ -586,8 +587,8 @@ function foeHtml(run: RunState, enemy: Fighter, index: number, app: AppState, cl
     <div class="foe ${selected ? "selected" : ""} ${tracked ? "tracked" : ""} ${down ? "down" : ""} ${enemy.boss ? "boss" : ""} ${enemy.elite ? "elite" : ""}" data-act="target" data-arg="${enemy.uid}" data-who="${enemy.uid}" style="--slot:${index};--box:${box};${spotVars("c", close)};${spotVars("w", wide)}">
       ${down ? "" : intentHtml(plan)}
       <div class="unit-art">
-        ${chaseArt(enemy.silhouette, "rear", { livery: def.livery })}
-        ${chaseArt(enemy.silhouette, "front", { livery: def.livery })}
+        ${chaseArt(enemy.silhouette, "rear", { livery: def.livery, spent: spentStations(enemy.uid) })}
+        ${chaseArt(enemy.silhouette, "front", { livery: def.livery, spent: spentStations(enemy.uid) })}
         ${jetArt(enemy.silhouette, { livery: def.livery, cls: "side" })}
         <div class="reticle"><b>${selected ? "Lock" : "Tgt"}</b><small>${range} nm</small></div>
       </div>
@@ -740,7 +741,7 @@ function battle(app: AppState): string {
         <div class="contact-tag"><span>${esc(combat.encounterName)}</span><b>Turn ${combat.turn}</b></div>
         <div class="foes">${foes}</div>
         <div class="ally" data-who="-1" style="${spotVars("c", allySpot(shape, "close"))};${spotVars("w", allySpot(shape, "wide"))}">
-          <div class="unit-art">${chaseArt(jet.silhouette, "rear", { cls: "player" })}</div>
+          <div class="unit-art">${chaseArt(jet.silhouette, "rear", { cls: "player", spent: spentStations(PLAYER) })}</div>
         </div>
         <div class="pilot">
           <div class="nameplate"><b>${esc(jet.callsign)}</b><small>${esc(jet.code)} ${esc(jet.name)}</small></div>

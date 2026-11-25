@@ -53,12 +53,44 @@ export function anchor(who: number, fx: number, fy: number): Pt | null {
   return r ? { x: r.left + r.width * fx, y: r.top + r.height * fy } : null;
 }
 
-/**
- * Where shots leave an airframe. Every jet that fires is seen from behind, heading into the frame,
- * so fire leaves the spine just ahead of centre.
- */
+/** The painting of a unit that is showing now: its front quarter while it turns in, otherwise its rear view. */
+export function spriteEl(who: number): HTMLElement | null {
+  const unit = unitEl(who);
+  if (!unit) return null;
+  const front = unit.dataset.view === "front" ? unit.querySelector<HTMLElement>(".cj-front") : null;
+  return front ?? unit.querySelector<HTMLElement>(".cj-rear") ?? unit.querySelector<HTMLElement>(".cj");
+}
+
+function spot(el: Element): Pt {
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+
+/** Every anchor of one kind on the sprite that is showing, as screen points: "gun", "flare", "chaff", "pod", "tip", "belly", "nose". */
+export function marks(who: number, name: string): Pt[] {
+  return [...(spriteEl(who)?.querySelectorAll<HTMLElement>(`.ap[data-ap="${name}"]`) ?? [])].map(spot);
+}
+
+export function mark(who: number, name: string, index = 0): Pt | null {
+  const all = marks(who, name);
+  return all.length ? all[index % all.length] : null;
+}
+
+/** The weapon stations on the sprite that is showing, in firing order. */
+export function stations(who: number): HTMLElement[] {
+  return [...(spriteEl(who)?.querySelectorAll<HTMLElement>(".store") ?? [])];
+}
+
+/** Where the gun's muzzle is on screen. */
 export function muzzle(who: number): Pt | null {
-  return anchor(who, 0.5, who === PLAYER ? 0.38 : 0.42);
+  return mark(who, "gun") ?? anchor(who, 0.5, who === PLAYER ? 0.38 : 0.42);
+}
+
+/** A point on the hull for a round to land on: around the fuselage and wing roots, not out in the air. */
+export function hullPoint(who: number, spread = 1): Pt | null {
+  const r = (spriteEl(who) ?? artEl(who))?.getBoundingClientRect();
+  if (!r) return null;
+  return { x: r.left + r.width * (0.5 + rnd(-0.2, 0.2) * spread), y: r.top + r.height * (0.6 + rnd(-0.16, 0.14) * spread) };
 }
 
 /** How near the camera an airframe sits, from its drawn size: about 1 for the player's jet up close. */
@@ -75,11 +107,7 @@ export function blastScale(who: number): number {
 
 /** Centres of the lit exhausts on the player's jet, or a point at its tail. */
 export function nozzles(who: number): Pt[] {
-  const glows = [...(artEl(who)?.querySelectorAll<HTMLElement>(".cj-rear .cj-glow") ?? [])];
-  const pts = glows.map((g) => {
-    const r = g.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  });
+  const pts = [...(artEl(who)?.querySelectorAll<HTMLElement>(".cj-rear .cj-glow") ?? [])].map(spot);
   if (pts.length) return pts;
   const tail = anchor(who, 0.5, 0.72);
   return tail ? [tail] : [];
