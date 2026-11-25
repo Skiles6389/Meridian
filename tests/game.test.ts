@@ -116,7 +116,7 @@ describe("combat", () => {
     expect(run.hp).toBe(hp - 10);
   });
 
-  it("splits an end turn so enemies attack from behind, then the player takes the lead back", () => {
+  it("splits an end turn into the wide enemy phase and the close player turn that follows", () => {
     for (const id of ["a1-pair", "a2-zwilling", "a1-eule", "a2-adler", "a3-nebel"]) {
       const { run } = boot(11);
       startEncounter(run, id);
